@@ -49,9 +49,11 @@ type Menu struct {
 	instance      *session.Instance
 	activeTab     int
 
-	// actionGroupStart and actionGroupEnd delimit the action group within options. They
-	// are recomputed whenever the options change so that adding an option does not shift
-	// the highlighted range or the group separators.
+	// actionGroupStart and actionGroupEnd delimit the action group within options. They are
+	// set at the top of every updateOptions() call, before the state switch, so that every
+	// state has well-defined boundaries even if it does not build an action group of its
+	// own; addInstanceOptions then overwrites them for the states that do build one. This
+	// keeps adding an option from shifting the highlighted range or the group separators.
 	actionGroupStart, actionGroupEnd int
 
 	// keyDown is the key which is pressed. The default is -1.
@@ -109,6 +111,11 @@ func (m *Menu) SetActiveTab(tab int) {
 
 // updateOptions updates the menu options based on current state and instance
 func (m *Menu) updateOptions() {
+	// Default to the boundaries the non-instance states have always used. Every path
+	// through this switch therefore leaves them well-defined; addInstanceOptions
+	// overwrites them for states that build an action group of their own.
+	m.actionGroupStart, m.actionGroupEnd = 2, 5
+
 	switch m.state {
 	case StateEmpty:
 		m.options = defaultMenuOptions
@@ -131,7 +138,6 @@ func (m *Menu) addInstanceOptions() {
 	// Loading instances only get minimal options
 	if m.instance != nil && m.instance.Status == session.Loading {
 		m.options = []keys.KeyName{keys.KeyNew, keys.KeyHelp, keys.KeyQuit}
-		m.actionGroupStart, m.actionGroupEnd = 2, 5
 		return
 	}
 
