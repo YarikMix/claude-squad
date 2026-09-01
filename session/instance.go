@@ -1,6 +1,7 @@
 package session
 
 import (
+	"claude-squad/config"
 	"claude-squad/log"
 	"claude-squad/session/git"
 	"claude-squad/session/tmux"
@@ -137,6 +138,7 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 	if instance.Paused() {
 		instance.started = true
 		instance.tmuxSession = tmux.NewTmuxSession(instance.Title, instance.Program)
+		instance.tmuxSession.SetRestartCommand(restartCommandFor(instance.Program))
 	} else {
 		if err := instance.Start(false); err != nil {
 			return nil, err
@@ -183,6 +185,19 @@ func NewInstance(opts InstanceOptions) (*Instance, error) {
 	}, nil
 }
 
+// loadRestartArgs reads the restart args from the config. It is a variable so tests can pin
+// a value instead of depending on (and creating) the user's real config file.
+var loadRestartArgs = func() string {
+	return config.LoadConfig().RestartArgs
+}
+
+// restartCommandFor builds the command used to bring program back up on restart. The args
+// are read from the config on every call rather than stored in state.json, so editing the
+// config takes effect on existing instances without migrating their saved state.
+func restartCommandFor(program string) string {
+	return tmux.BuildRestartCommand(program, loadRestartArgs())
+}
+
 func (i *Instance) RepoName() (string, error) {
 	if !i.started {
 		return "", fmt.Errorf("cannot get repo name for instance that has not been started")
@@ -214,6 +229,10 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 		tmuxSession = tmux.NewTmuxSession(i.Title, i.Program)
 	}
 	i.tmuxSession = tmuxSession
+	// Restart args are never used for the session created below: a fresh worktree has no
+	// conversation to continue. They apply to Restart and to Resume, which rebuilds a
+	// session whose tmux server died.
+	i.tmuxSession.SetRestartCommand(restartCommandFor(i.Program))
 
 	if firstTimeSetup {
 		if i.selectedBranch != "" {
@@ -538,13 +557,15 @@ func (i *Instance) Resume() error {
 		}
 	}
 
-	// Check if tmux session still exists from pause, otherwise create new one
+	// Check if tmux session still exists from pause, otherwise create new one. A session
+	// that survived the pause still has the program running with its context, so only the
+	// paths that create a new session ask for the restart command.
 	if i.tmuxSession.DoesSessionExist() {
 		// Session exists, just restore PTY connection to it
 		if err := i.tmuxSession.Restore(); err != nil {
 			log.ErrorLog.Print(err)
 			// If restore fails, fall back to creating new session
-			if err := i.tmuxSession.Start(i.gitWorktree.GetWorktreePath()); err != nil {
+			if err := i.tmuxSession.StartWithRestartCommand(i.gitWorktree.GetWorktreePath()); err != nil {
 				log.ErrorLog.Print(err)
 				// Cleanup git worktree if tmux session creation fails
 				if cleanupErr := i.gitWorktree.Cleanup(); cleanupErr != nil {
@@ -556,7 +577,7 @@ func (i *Instance) Resume() error {
 		}
 	} else {
 		// Create new tmux session
-		if err := i.tmuxSession.Start(i.gitWorktree.GetWorktreePath()); err != nil {
+		if err := i.tmuxSession.StartWithRestartCommand(i.gitWorktree.GetWorktreePath()); err != nil {
 			log.ErrorLog.Print(err)
 			// Cleanup git worktree if tmux session creation fails
 			if cleanupErr := i.gitWorktree.Cleanup(); cleanupErr != nil {
@@ -567,6 +588,31 @@ func (i *Instance) Resume() error {
 		}
 	}
 
+	i.SetStatus(Running)
+	return nil
+}
+
+// Restart replaces the program running in the session's pane, appending the configured
+// restart args so the agent comes back with its previous conversation. The tmux session,
+// the git worktree and the branch are left untouched, and a user attached to the pane stays
+// attached.
+func (i *Instance) Restart() error {
+	if !i.started {
+		return fmt.Errorf("cannot restart instance that has not been started")
+	}
+	if i.Status == Paused {
+		return fmt.Errorf("cannot restart a paused session: press 'r' to resume it first")
+	}
+	// Respawning a pane of a session that no longer exists cannot work. Point the user at
+	// Resume, which rebuilds the session from the branch.
+	if !i.tmuxSession.DoesSessionExist() {
+		return fmt.Errorf("tmux session for '%s' no longer exists: press 'r' to resume it", i.Title)
+	}
+	// Re-read the args so a config edit applies without restarting claude-squad.
+	i.tmuxSession.SetRestartCommand(restartCommandFor(i.Program))
+	if err := i.tmuxSession.RespawnPane(); err != nil {
+		return fmt.Errorf("failed to restart session '%s': %w", i.Title, err)
+	}
 	i.SetStatus(Running)
 	return nil
 }
