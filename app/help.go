@@ -47,6 +47,8 @@ func (h helpTypeGeneral) toContent() string {
 		keyStyle.Render("J/K")+descStyle.Render("       - Reorder sessions"),
 		keyStyle.Render("↵/o")+descStyle.Render("       - Attach to the selected session"),
 		keyStyle.Render("ctrl-q")+descStyle.Render("    - Detach from session"),
+		keyStyle.Render("R")+descStyle.Render("         - Restart the agent, continuing its conversation"),
+		keyStyle.Render("ctrl-x")+descStyle.Render("    - Restart the agent while attached to it"),
 		"",
 		headerStyle.Render("Handoff:"),
 		keyStyle.Render("p")+descStyle.Render("         - Commit and push branch to github"),
@@ -88,6 +90,7 @@ func (h helpTypeInstanceAttach) toContent() string {
 		titleStyle.Render("Attaching to Instance"),
 		"",
 		descStyle.Render("To detach from a session, press ")+keyStyle.Render("ctrl-q"),
+		descStyle.Render("To restart the agent without detaching, press ")+keyStyle.Render("ctrl-x"),
 	)
 	return content
 }

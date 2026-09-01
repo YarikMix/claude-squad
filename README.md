@@ -103,6 +103,8 @@ The menu at the bottom of the screen shows available commands:
 - `s` - Commit and push branch to github
 - `c` - Checkout. Commits changes and pauses the session
 - `r` - Resume a paused session
+- `R` - Restart the agent in the selected session, continuing its conversation
+- `ctrl-x` - Restart the agent while attached to it, without detaching (reserved by claude-squad, so an agent CLI that binds `ctrl-x` itself won't see it)
 - `?` - Show help menu
 
 ##### Navigation
@@ -113,6 +115,12 @@ The menu at the bottom of the screen shows available commands:
 ### Configuration
 
 Claude Squad stores its configuration in `~/.claude-squad/config.json`. You can find the exact path by running `cs debug`.
+
+`restart_args` are appended to the program when a session is restarted (`R` / `ctrl-x`) or
+when a session is resumed after its tmux session died, so the agent comes back holding its
+previous conversation. They are never used on a session's first start, where a fresh worktree
+has nothing to continue. The default is `--continue`, which matches Claude Code; set it to
+your agent's own resume flag, or to `""` to restart without extra arguments.
 
 #### Profiles
 
