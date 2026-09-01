@@ -111,6 +111,10 @@ func (t *TmuxSession) SetRestartCommand(command string) {
 // invocation: if program itself contains shell operators, there is no unambiguous place to
 // append args or make the `||` fallback cover the whole expression, so program is returned
 // unchanged in that case too.
+//
+// Only program is checked for shell operators. args is not: it is user-authored config
+// (config.RestartArgs), documented as applied verbatim, and is appended as-is even if it
+// contains its own shell syntax.
 func BuildRestartCommand(program, args string) string {
 	program = strings.TrimSpace(program)
 	args = strings.TrimSpace(args)

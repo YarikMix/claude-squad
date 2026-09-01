@@ -557,6 +557,10 @@ func (i *Instance) Resume() error {
 		}
 	}
 
+	// Re-read the args so a config edit applies without restarting claude-squad, same as
+	// Restart does.
+	i.tmuxSession.SetRestartCommand(restartCommandFor(i.Program))
+
 	// Check if tmux session still exists from pause, otherwise create new one. A session
 	// that survived the pause still has the program running with its context, so only the
 	// paths that create a new session ask for the restart command.
