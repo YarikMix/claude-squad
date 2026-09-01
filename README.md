@@ -120,7 +120,11 @@ Claude Squad stores its configuration in `~/.claude-squad/config.json`. You can 
 when a session is resumed after its tmux session died, so the agent comes back holding its
 previous conversation. They are never used on a session's first start, where a fresh worktree
 has nothing to continue. The default is `--continue`, which matches Claude Code; set it to
-your agent's own resume flag, or to `""` to restart without extra arguments.
+your agent's own resume flag, or to `""` to restart without extra arguments. If your program
+contains shell operators (`;`, `&&`, `||`, `|`, ...), there is no unambiguous place to append
+the args, so a restart runs the program unchanged and will not continue the conversation. Note
+also that a restart kills the running agent process outright (`respawn-pane -k` sends
+SIGKILL), so anything it had in flight is lost.
 
 #### Profiles
 
