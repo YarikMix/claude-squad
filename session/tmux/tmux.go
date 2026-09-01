@@ -406,6 +406,16 @@ func (t *TmuxSession) Attach() (chan struct{}, error) {
 				return
 			}
 
+			// Check for Ctrl+x (ASCII 24): restart the program in the pane without
+			// tearing down the attached connection. Only sessions with a restart command
+			// take part; the terminal tab leaves it empty so Ctrl+x reaches its shell.
+			if nr == 1 && buf[0] == 24 && t.restartCommand != "" {
+				if err := t.RespawnPane(); err != nil {
+					log.ErrorLog.Printf("error restarting pane for session %s: %v", t.sanitizedName, err)
+				}
+				continue
+			}
+
 			// Forward other input to tmux
 			_, _ = t.ptmx.Write(buf[:nr])
 		}
