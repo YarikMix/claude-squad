@@ -45,6 +45,11 @@ type recordingPtyFactory struct {
 	t       *testing.T
 	ran     *[]string
 	onStart func(cmdString string)
+	// failStart, when set, is consulted for every Start call (after recording and onStart);
+	// a non-nil return fails that call with the given error instead of opening a PTY. Lets a
+	// test simulate one tmux invocation failing (e.g. an attach-session racing a session that
+	// died right after creation) without touching the other calls.
+	failStart func(cmdString string) error
 }
 
 func (p *recordingPtyFactory) Start(cmd *exec.Cmd) (*os.File, error) {
@@ -52,6 +57,11 @@ func (p *recordingPtyFactory) Start(cmd *exec.Cmd) (*os.File, error) {
 	*p.ran = append(*p.ran, s)
 	if p.onStart != nil {
 		p.onStart(s)
+	}
+	if p.failStart != nil {
+		if err := p.failStart(s); err != nil {
+			return nil, err
+		}
 	}
 	return os.OpenFile(filepath.Join(p.t.TempDir(), "pty"), os.O_CREATE|os.O_RDWR, 0644)
 }
@@ -379,4 +389,98 @@ func TestResumeRecreatesGoneSessionWithRestartCommand(t *testing.T) {
 	}
 	require.NotEmpty(t, newSession, "expected a new-session command, got: %v", ran)
 	require.Contains(t, newSession, "claude --continue || claude")
+}
+
+// A restart_args value that makes the composed restart command exit immediately (a
+// non-interactive flag, "--version", ...) makes tmux new-session's poll for the session time
+// out, so StartWithRestartCommand fails exactly as if the session could never start at all.
+// Resume must retry with the plain program before falling through to gitWorktree.Cleanup(),
+// which force-removes the worktree and runs `git branch -D` — a misconfigured setting should
+// cost the user their conversation continuity, never their branch.
+//
+// worktree remove and branch -D run through real git (git.GitWorktree.Cleanup uses exec.Command
+// directly, not the mocked tmux cmdExec/ptyFactory), so a mocked command log can't prove they
+// didn't run. A real branch is created instead, and its survival is the actual assertion.
+func TestResumeFallsBackToPlainStartWhenRestartCommandFailsToStart(t *testing.T) {
+	repoPath, worktreePath := newResumeTestRepo(t)
+	mustRunGit(t, repoPath, "branch", "feature/test")
+
+	var ran []string
+	var sessionExists bool
+	attachAttempts := 0
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			s := cmd.String()
+			ran = append(ran, s)
+			switch {
+			case strings.Contains(s, "has-session"):
+				if sessionExists {
+					return nil
+				}
+				return fmt.Errorf("can't find session")
+			case strings.Contains(s, "kill-session"):
+				sessionExists = false
+				return nil
+			}
+			return nil
+		},
+	}
+	ptyFactory := &recordingPtyFactory{
+		t:   t,
+		ran: &ran,
+		onStart: func(s string) {
+			if strings.Contains(s, "new-session") {
+				sessionExists = true
+			}
+		},
+		failStart: func(s string) error {
+			if strings.Contains(s, "attach-session") {
+				attachAttempts++
+				if attachAttempts == 1 {
+					// Simulates the restart command's session dying right after creation
+					// (e.g. a quick-exiting composed command): new-session succeeded, but
+					// there is nothing left for Restore to attach to.
+					return fmt.Errorf("session died before attach")
+				}
+			}
+			return nil
+		},
+	}
+	tmuxSession := tmux.NewTmuxSessionWithDeps("resume-bad-args", "claude", ptyFactory, cmdExec)
+	tmuxSession.SetRestartCommand(restartCommandFor("claude"))
+
+	instance, err := FromInstanceData(InstanceData{
+		Title:   "resume-bad-args",
+		Path:    repoPath,
+		Branch:  "feature/test",
+		Status:  Paused,
+		Program: "claude",
+		Worktree: GitWorktreeData{
+			RepoPath:     repoPath,
+			WorktreePath: worktreePath,
+			SessionName:  "resume-bad-args",
+			BranchName:   "feature/test",
+		},
+	})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmuxSession)
+
+	require.NoError(t, instance.Resume(), "a bad restart command must fall back, not fail Resume")
+	require.Equal(t, Running, instance.Status)
+	require.Equal(t, 2, attachAttempts,
+		"expected one failed attach (restart command) and one successful attach (fallback)")
+
+	var newSessions []string
+	for _, c := range ran {
+		if strings.Contains(c, "new-session") {
+			newSessions = append(newSessions, c)
+		}
+	}
+	require.Len(t, newSessions, 2, "expected a restart-flavored attempt and a plain fallback attempt")
+	require.Contains(t, newSessions[0], "--continue", "the first attempt should carry the restart args")
+	require.NotContains(t, newSessions[1], "--continue", "the fallback attempt should be the bare program")
+
+	out := mustRunGit(t, repoPath, "branch", "--list", "feature/test")
+	require.Contains(t, out, "feature/test",
+		"the branch must survive a restart_args that only breaks the resume, not the session")
 }

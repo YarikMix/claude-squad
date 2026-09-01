@@ -565,7 +565,7 @@ func (i *Instance) Resume() error {
 		if err := i.tmuxSession.Restore(); err != nil {
 			log.ErrorLog.Print(err)
 			// If restore fails, fall back to creating new session
-			if err := i.tmuxSession.StartWithRestartCommand(i.gitWorktree.GetWorktreePath()); err != nil {
+			if err := i.startWithRestartFallback(i.gitWorktree.GetWorktreePath()); err != nil {
 				log.ErrorLog.Print(err)
 				// Cleanup git worktree if tmux session creation fails
 				if cleanupErr := i.gitWorktree.Cleanup(); cleanupErr != nil {
@@ -577,7 +577,7 @@ func (i *Instance) Resume() error {
 		}
 	} else {
 		// Create new tmux session
-		if err := i.tmuxSession.StartWithRestartCommand(i.gitWorktree.GetWorktreePath()); err != nil {
+		if err := i.startWithRestartFallback(i.gitWorktree.GetWorktreePath()); err != nil {
 			log.ErrorLog.Print(err)
 			// Cleanup git worktree if tmux session creation fails
 			if cleanupErr := i.gitWorktree.Cleanup(); cleanupErr != nil {
@@ -589,6 +589,32 @@ func (i *Instance) Resume() error {
 	}
 
 	i.SetStatus(Running)
+	return nil
+}
+
+// startWithRestartFallback starts a new tmux session using the configured restart command,
+// retrying once with the bare program if that fails.
+//
+// tmux new-session succeeds as soon as the session is created, even if the command running in
+// it exits immediately afterward — which is exactly what a misconfigured restart_args can
+// cause (e.g. a non-interactive flag that makes the composed "program args || program" exit 0
+// before the `||` fallback ever gets a chance to matter). start() then times out polling for
+// the session, so StartWithRestartCommand fails, and Resume's caller responds by calling
+// gitWorktree.Cleanup() — which force-removes the worktree and runs `git branch -D`. A bad
+// config value should cost the user their conversation continuity, never their branch, so
+// retry with the plain program (the same command Resume ran before restart_args existed, and
+// one the user has already proven starts) before giving up.
+func (i *Instance) startWithRestartFallback(workdir string) error {
+	err := i.tmuxSession.StartWithRestartCommand(workdir)
+	if err == nil {
+		return nil
+	}
+	log.WarningLog.Printf(
+		"failed to start session %q with restart_args applied (likely a misconfigured restart_args); "+
+			"falling back to a plain start: %v", i.Title, err)
+	if startErr := i.tmuxSession.Start(workdir); startErr != nil {
+		return fmt.Errorf("restart command failed (%v) and fallback start also failed: %w", err, startErr)
+	}
 	return nil
 }
 
