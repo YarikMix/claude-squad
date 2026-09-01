@@ -31,6 +31,10 @@ type TmuxSession struct {
 	// The name of the tmux session and the sanitized name used for tmux commands.
 	sanitizedName string
 	program       string
+	// restartCommand is the command used to bring the program back up on restart. It is
+	// empty for sessions that should not be restartable (the terminal tab's shell), in
+	// which case restarts fall back to the bare program.
+	restartCommand string
 	// ptyFactory is used to create a PTY for the tmux session.
 	ptyFactory PtyFactory
 	// cmdExec is used to execute commands in the tmux session.
@@ -90,16 +94,74 @@ func newTmuxSession(name string, program string, ptyFactory PtyFactory, cmdExec 
 	}
 }
 
+// SetRestartCommand sets the command used by RespawnPane and StartWithRestartCommand.
+// Setting a non-empty value also enables the in-session Ctrl+x restart shortcut.
+func (t *TmuxSession) SetRestartCommand(command string) {
+	t.restartCommand = command
+}
+
+// BuildRestartCommand composes the command that brings program back up with args appended,
+// falling back to the bare program if the args fail. tmux passes a single shell-command
+// argument to the shell, so the `||` is honored: `claude --continue` exits non-zero in a
+// worktree with no conversation on disk, and without the fallback that would take the pane
+// — and with it the tmux session — down with it.
+//
+// Returns program unchanged when args is empty, so programs with no resume flag still
+// restart normally.
+func BuildRestartCommand(program, args string) string {
+	program = strings.TrimSpace(program)
+	args = strings.TrimSpace(args)
+	if program == "" || args == "" {
+		return program
+	}
+	return fmt.Sprintf("%s %s || %s", program, args, program)
+}
+
+// restartCommandOrProgram returns the configured restart command, or the bare program when
+// none is set.
+func (t *TmuxSession) restartCommandOrProgram() string {
+	if t.restartCommand == "" {
+		return t.program
+	}
+	return t.restartCommand
+}
+
+// RespawnPane restarts the program in the session's pane, replacing the running process.
+// The tmux session, its name and the attached PTY survive, so a user attached to the pane
+// stays attached and watches the program come back up. The pane's scrollback does not
+// survive: tmux clears it on respawn.
+func (t *TmuxSession) RespawnPane() error {
+	if !t.DoesSessionExist() {
+		return ErrSessionNotFound
+	}
+	cmd := exec.Command("tmux", "respawn-pane", "-k", "-t", t.sanitizedName, t.restartCommandOrProgram())
+	if err := t.cmdExec.Run(cmd); err != nil {
+		return fmt.Errorf("error respawning tmux pane for session %s: %w", t.sanitizedName, err)
+	}
+	return nil
+}
+
 // Start creates and starts a new tmux session, then attaches to it. Program is the command to run in
 // the session (ex. claude). workdir is the git worktree directory.
 func (t *TmuxSession) Start(workDir string) error {
+	return t.start(workDir, t.program)
+}
+
+// StartWithRestartCommand creates the session running the restart command rather than the
+// bare program, so a session rebuilt after its tmux server died comes back with the
+// agent's previous conversation. Falls back to the program when no restart command is set.
+func (t *TmuxSession) StartWithRestartCommand(workDir string) error {
+	return t.start(workDir, t.restartCommandOrProgram())
+}
+
+func (t *TmuxSession) start(workDir string, command string) error {
 	// Check if the session already exists
 	if t.DoesSessionExist() {
 		return fmt.Errorf("tmux session already exists: %s", t.sanitizedName)
 	}
 
 	// Create a new detached tmux session and start claude in it
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", t.sanitizedName, "-c", workDir, t.program)
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", t.sanitizedName, "-c", workDir, command)
 
 	ptmx, err := t.ptyFactory.Start(cmd)
 	if err != nil {
