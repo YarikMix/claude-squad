@@ -604,8 +604,11 @@ func (i *Instance) Restart() error {
 		return fmt.Errorf("cannot restart a paused session: press 'r' to resume it first")
 	}
 	// Respawning a pane of a session that no longer exists cannot work. Point the user at
-	// Resume, which rebuilds the session from the branch.
+	// Resume, which rebuilds the session from the branch. Park the instance as Paused first
+	// (mirroring Start's !firstTimeSetup branch for the same condition) so that advice is
+	// actually actionable: Resume refuses to run on anything but a Paused instance.
 	if !i.tmuxSession.DoesSessionExist() {
+		i.SetStatus(Paused)
 		return fmt.Errorf("tmux session for '%s' no longer exists: press 'r' to resume it", i.Title)
 	}
 	// Re-read the args so a config edit applies without restarting claude-squad.

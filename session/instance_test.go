@@ -183,6 +183,9 @@ func TestRestartOnPausedInstanceReturnsError(t *testing.T) {
 }
 
 // The tmux server can die between runs, leaving a Running instance whose session is gone.
+// The error must point somewhere that actually works: Resume refuses anything but a Paused
+// instance, so Restart has to park the instance as Paused itself before telling the user to
+// press 'r' — otherwise the advice is a dead end.
 func TestRestartWhenTmuxSessionIsGoneReturnsError(t *testing.T) {
 	cmdExec := cmd_test.MockCmdExec{
 		RunFunc: func(cmd *exec.Cmd) error {
@@ -204,6 +207,34 @@ func TestRestartWhenTmuxSessionIsGoneReturnsError(t *testing.T) {
 	err = instance.Restart()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no longer exists")
+	require.Equal(t, Paused, instance.Status,
+		"the error tells the user to press 'r'; that only works once the instance is actually Paused")
+}
+
+// When the respawn itself fails (the session is still alive, just uncooperative), neither
+// Running nor Paused would be an improvement, so Status must be left exactly as it was. This
+// must hold at the same time as the assertion above: that one changes Status on the
+// session-gone path, this one requires it unchanged on the respawn-failed path.
+func TestRestartLeavesStatusUnchangedWhenRespawnFails(t *testing.T) {
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			if strings.Contains(cmd.String(), "respawn-pane") {
+				return fmt.Errorf("respawn-pane failed")
+			}
+			return nil // has-session (and everything else) succeeds: the session is alive
+		},
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "respawn-fails", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("respawn-fails", "claude", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+
+	statusBefore := instance.Status
+	err = instance.Restart()
+	require.Error(t, err)
+	require.Equal(t, statusBefore, instance.Status,
+		"a failed respawn leaves the session alive; Status must not change")
 }
 
 // An instance that has never been started has nothing to restart.
