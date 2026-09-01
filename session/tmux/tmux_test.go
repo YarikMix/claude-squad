@@ -135,6 +135,18 @@ func TestBuildRestartCommand(t *testing.T) {
 	require.Equal(t, "aider", BuildRestartCommand("aider", ""))
 	require.Equal(t, "aider", BuildRestartCommand("aider", "   "))
 	require.Equal(t, "", BuildRestartCommand("", "--continue"))
+
+	// A program with shell operators has no unambiguous place for the args: `&&` and `||`
+	// are left-associative and same-precedence, and `;` binds looser than `||`, so an
+	// appended `|| program` would cover the wrong sub-expression. Degrade to the program.
+	require.Equal(t, "claude;", BuildRestartCommand("claude;", "--continue"))
+	require.Equal(t, "claude && echo done", BuildRestartCommand("claude && echo done", "--continue"))
+	require.Equal(t, "claude | tee log", BuildRestartCommand("claude | tee log", "--continue"))
+	require.Equal(t, "(claude)", BuildRestartCommand("(claude)", "--continue"))
+
+	// Characters that are not operators must still get the args appended.
+	require.Equal(t, `claude --add-dir "$HOME/my dir" --continue || claude --add-dir "$HOME/my dir"`,
+		BuildRestartCommand(`claude --add-dir "$HOME/my dir"`, "--continue"))
 }
 
 func TestRespawnPaneUsesRestartCommand(t *testing.T) {

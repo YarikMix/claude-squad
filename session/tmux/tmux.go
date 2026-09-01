@@ -107,11 +107,21 @@ func (t *TmuxSession) SetRestartCommand(command string) {
 // — and with it the tmux session — down with it.
 //
 // Returns program unchanged when args is empty, so programs with no resume flag still
-// restart normally.
+// restart normally. Args are appended only when program is a simple `program [flags]`
+// invocation: if program itself contains shell operators, there is no unambiguous place to
+// append args or make the `||` fallback cover the whole expression, so program is returned
+// unchanged in that case too.
 func BuildRestartCommand(program, args string) string {
 	program = strings.TrimSpace(program)
 	args = strings.TrimSpace(args)
 	if program == "" || args == "" {
+		return program
+	}
+	// A program containing shell operators has no unambiguous place to append args:
+	// `a && b` would take them on b, and `||` would bind to the last sub-command rather
+	// than the whole expression, so the fallback would stop covering it. Restart the
+	// program as-is instead — a restart without the resume args beats a malformed command.
+	if strings.ContainsAny(program, ";&|<>()`\n") {
 		return program
 	}
 	return fmt.Sprintf("%s %s || %s", program, args, program)
