@@ -239,6 +239,62 @@ func TestBuildRestartCommand(t *testing.T) {
 		BuildRestartCommand(`claude --add-dir "$HOME/my dir"`, "--continue"))
 }
 
+func TestRespawnPaneUsesRestartCommand(t *testing.T) {
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd2.ToString(cmd))
+			return nil
+		},
+	}
+
+	session := NewTmuxSessionWithDeps("restarted", "claude", NewMockPtyFactory(t), cmdExec)
+	session.SetRestartCommand("claude --continue || claude")
+
+	require.NoError(t, session.RespawnPane())
+	require.Contains(t, ran,
+		"tmux respawn-pane -k -t claudesquad_restarted claude --continue || claude")
+}
+
+// With no restart command configured, a restart still has to bring the program back up.
+func TestRespawnPaneFallsBackToProgram(t *testing.T) {
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd2.ToString(cmd))
+			return nil
+		},
+	}
+
+	session := NewTmuxSessionWithDeps("plain", "aider", NewMockPtyFactory(t), cmdExec)
+
+	require.NoError(t, session.RespawnPane())
+	require.Contains(t, ran, "tmux respawn-pane -k -t claudesquad_plain aider")
+}
+
+// Respawning a pane of a session that no longer exists cannot work; callers need to tell
+// that apart from a failed respawn so they can point the user at resume instead.
+func TestRespawnPaneReturnsErrSessionNotFoundWhenSessionIsGone(t *testing.T) {
+	respawned := false
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			if strings.Contains(cmd.String(), "has-session") {
+				return fmt.Errorf("can't find session")
+			}
+			if strings.Contains(cmd.String(), "respawn-pane") {
+				respawned = true
+			}
+			return nil
+		},
+	}
+
+	session := NewTmuxSessionWithDeps("gone", "claude", NewMockPtyFactory(t), cmdExec)
+	session.SetRestartCommand("claude --continue || claude")
+
+	require.ErrorIs(t, session.RespawnPane(), ErrSessionNotFound)
+	require.False(t, respawned, "should not respawn a pane of a session that does not exist")
+}
+
 // Resume rebuilds a session whose tmux server died. That new session is where the
 // conversation is lost today, so it starts the restart command rather than the bare program.
 func TestStartWithRestartCommandStartsRestartCommand(t *testing.T) {

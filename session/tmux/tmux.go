@@ -97,7 +97,8 @@ func newTmuxSession(name string, program string, ptyFactory PtyFactory, cmdExec 
 	}
 }
 
-// SetRestartCommand sets the command used by StartWithRestartCommand.
+// SetRestartCommand sets the command used by RespawnPane and StartWithRestartCommand.
+// Setting a non-empty value also enables the in-session Ctrl+x restart shortcut.
 func (t *TmuxSession) SetRestartCommand(command string) {
 	t.restartCommand = command
 }
@@ -140,6 +141,21 @@ func (t *TmuxSession) restartCommandOrProgram() string {
 		return t.program
 	}
 	return t.restartCommand
+}
+
+// RespawnPane restarts the program in the session's pane, replacing the running process.
+// The tmux session, its name and the attached PTY survive, so a user attached to the pane
+// stays attached and watches the program come back up. The pane's scrollback does not
+// survive: tmux clears it on respawn.
+func (t *TmuxSession) RespawnPane() error {
+	if !t.DoesSessionExist() {
+		return ErrSessionNotFound
+	}
+	cmd := exec.Command("tmux", "respawn-pane", "-k", "-t", t.sanitizedName, t.restartCommandOrProgram())
+	if err := t.cmdExec.Run(cmd); err != nil {
+		return fmt.Errorf("error respawning tmux pane for session %s: %w", t.sanitizedName, err)
+	}
+	return nil
 }
 
 // Start creates and starts a new tmux session, then attaches to it. Program is the command to run in
@@ -411,6 +427,16 @@ func (t *TmuxSession) Attach() (chan struct{}, error) {
 				// Detach from the session
 				t.Detach()
 				return
+			}
+
+			// Check for Ctrl+x (ASCII 24): restart the program in the pane without
+			// tearing down the attached connection. Only sessions with a restart command
+			// take part; the terminal tab leaves it empty so Ctrl+x reaches its shell.
+			if nr == 1 && buf[0] == 24 && t.restartCommand != "" {
+				if err := t.RespawnPane(); err != nil {
+					log.ErrorLog.Printf("error restarting pane for session %s: %v", t.sanitizedName, err)
+				}
+				continue
 			}
 
 			// Forward other input to tmux

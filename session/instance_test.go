@@ -143,6 +143,142 @@ func TestStartRestoresInstanceWhenTmuxSessionSurvives(t *testing.T) {
 	require.Equal(t, 1, ptyFactory.calls)
 }
 
+// Restarting respawns the pane's process with the restart args appended, so the agent comes
+// back holding the conversation. The tmux session, the worktree and the branch are untouched.
+func TestRestartRespawnsPaneWithRestartArgs(t *testing.T) {
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd.String())
+			return nil
+		},
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "restarted", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("restarted", "claude", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+
+	require.NoError(t, instance.Restart())
+	require.Equal(t, Running, instance.Status)
+
+	var respawn string
+	for _, c := range ran {
+		if strings.Contains(c, "respawn-pane") {
+			respawn = c
+		}
+	}
+	require.NotEmpty(t, respawn, "expected a respawn-pane command, got: %v", ran)
+	require.Contains(t, respawn, "-k -t claudesquad_restarted claude --continue || claude")
+	require.NotContains(t, strings.Join(ran, "\n"), "kill-session",
+		"restart must not tear the session down")
+}
+
+// A paused instance has no pane to respawn: its worktree is gone and the process is dead.
+// Resume is the operation that rebuilds it, so say so instead of failing obscurely.
+func TestRestartOnPausedInstanceReturnsError(t *testing.T) {
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error { return nil },
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "paused", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("paused", "claude", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+	instance.SetStatus(Paused)
+
+	err = instance.Restart()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "'r'", "the error should point the user at resume")
+}
+
+// The tmux server can die between runs, leaving a Running instance whose session is gone.
+// The error must point somewhere that actually works: Resume refuses anything but a Paused
+// instance, so Restart has to park the instance as Paused itself before telling the user to
+// press 'r' — otherwise the advice is a dead end.
+func TestRestartWhenTmuxSessionIsGoneReturnsError(t *testing.T) {
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			if strings.Contains(cmd.String(), "has-session") {
+				return fmt.Errorf("can't find session")
+			}
+			return nil
+		},
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "gone", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("gone", "claude", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+	// Start parks an instance with a dead session as Paused; drop that so we exercise the
+	// session-existence check rather than the paused one.
+	instance.SetStatus(Running)
+
+	err = instance.Restart()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no longer exists")
+	require.Equal(t, Paused, instance.Status,
+		"the error tells the user to press 'r'; that only works once the instance is actually Paused")
+}
+
+// When the respawn itself fails (the session is still alive, just uncooperative), neither
+// Running nor Paused would be an improvement, so Status must be left exactly as it was. This
+// must hold at the same time as the assertion above: that one changes Status on the
+// session-gone path, this one requires it unchanged on the respawn-failed path.
+func TestRestartLeavesStatusUnchangedWhenRespawnFails(t *testing.T) {
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			if strings.Contains(cmd.String(), "respawn-pane") {
+				return fmt.Errorf("respawn-pane failed")
+			}
+			return nil // has-session (and everything else) succeeds: the session is alive
+		},
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "respawn-fails", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("respawn-fails", "claude", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+
+	statusBefore := instance.Status
+	err = instance.Restart()
+	require.Error(t, err)
+	require.Equal(t, statusBefore, instance.Status,
+		"a failed respawn leaves the session alive; Status must not change")
+}
+
+// An instance that has never been started has nothing to restart.
+func TestRestartOnUnstartedInstanceReturnsError(t *testing.T) {
+	instance, err := NewInstance(InstanceOptions{Title: "never", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+
+	require.Error(t, instance.Restart())
+}
+
+// Programs with no resume flag must still restart, just without extra args.
+func TestRestartWithEmptyRestartArgsRestartsBareProgram(t *testing.T) {
+	previous := loadRestartArgs
+	loadRestartArgs = func() string { return "" }
+	t.Cleanup(func() { loadRestartArgs = previous })
+
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd.String())
+			return nil
+		},
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "bare", Path: t.TempDir(), Program: "aider"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("bare", "aider", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+
+	require.NoError(t, instance.Restart())
+	require.Contains(t, strings.Join(ran, "\n"), "respawn-pane -k -t claudesquad_bare aider")
+	require.NotContains(t, strings.Join(ran, "\n"), "||")
+}
+
 // A tmux session that survived the pause is still running the program with its context, so
 // Resume must Restore it, never restart it — restarting would throw away the very
 // conversation this feature exists to preserve. This guards the plan's single most
