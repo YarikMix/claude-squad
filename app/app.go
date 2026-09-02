@@ -805,6 +805,14 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				return
 			}
 			<-ch
+			// The agent can exit from inside its pane (Ctrl+D), which takes the tmux
+			// session with it. Park the instance so the menu offers 'r resume', which is
+			// the operation that rebuilds it — Resume rejects instances that are not
+			// paused, so leaving it Running would advertise a recovery that fails. The
+			// worktree and branch are untouched, so nothing is lost.
+			if attached := m.list.GetSelectedInstance(); attached != nil && !attached.TmuxAlive() {
+				attached.SetStatus(session.Paused)
+			}
 			m.state = stateDefault
 			m.instanceChanged()
 		})
