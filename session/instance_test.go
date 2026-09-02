@@ -17,6 +17,9 @@ import (
 func TestMain(m *testing.M) {
 	log.Initialize(false)
 	defer log.Close()
+	// Pin the restart args so the suite neither reads nor creates the developer's real
+	// config file. Individual tests override this where the value matters.
+	loadRestartArgs = func() string { return "--continue" }
 	os.Exit(m.Run())
 }
 
@@ -32,6 +35,71 @@ func (p *nullPtyFactory) Start(cmd *exec.Cmd) (*os.File, error) {
 }
 
 func (p *nullPtyFactory) Close() {}
+
+// recordingPtyFactory behaves like nullPtyFactory but also records the tmux command used to
+// start each PTY (e.g. "attach-session" vs "new-session"), and lets a test react to a
+// command as it happens via onStart. Used by the Resume tests below to distinguish the
+// Restore path from the create path, and to fake a session coming into existence once a
+// new-session command has been issued.
+type recordingPtyFactory struct {
+	t       *testing.T
+	ran     *[]string
+	onStart func(cmdString string)
+	// failStart, when set, is consulted for every Start call (after recording and onStart);
+	// a non-nil return fails that call with the given error instead of opening a PTY. Lets a
+	// test simulate one tmux invocation failing (e.g. an attach-session racing a session that
+	// died right after creation) without touching the other calls.
+	failStart func(cmdString string) error
+}
+
+func (p *recordingPtyFactory) Start(cmd *exec.Cmd) (*os.File, error) {
+	s := cmd.String()
+	*p.ran = append(*p.ran, s)
+	if p.onStart != nil {
+		p.onStart(s)
+	}
+	if p.failStart != nil {
+		if err := p.failStart(s); err != nil {
+			return nil, err
+		}
+	}
+	return os.OpenFile(filepath.Join(p.t.TempDir(), "pty"), os.O_CREATE|os.O_RDWR, 0644)
+}
+
+func (p *recordingPtyFactory) Close() {}
+
+// mustRunGit runs a git command against dir (or with no -C prefix when dir is empty) and
+// fails the test on error. Mirrors the helper in session/git/worktree_ops_test.go.
+func mustRunGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmdArgs := args
+	if dir != "" {
+		cmdArgs = append([]string{"-C", dir}, args...)
+	}
+	cmd := exec.Command("git", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v failed: %s", args, output)
+	return string(output)
+}
+
+// newResumeTestRepo creates a real, minimal git repo at a fresh temp path (so
+// IsBranchCheckedOut has something real to run against) and a worktree-shaped directory
+// containing only a .git entry (so IsValidWorktree reports true and Resume skips Setup(),
+// leaving only the tmux paths under test). It returns the repo path and the worktree path.
+func newResumeTestRepo(t *testing.T) (repoPath, worktreePath string) {
+	t.Helper()
+	repoPath = filepath.Join(t.TempDir(), "repo")
+	mustRunGit(t, "", "init", repoPath)
+	mustRunGit(t, repoPath, "config", "user.name", "Test User")
+	mustRunGit(t, repoPath, "config", "user.email", "test@example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0644))
+	mustRunGit(t, repoPath, "add", "README.md")
+	mustRunGit(t, repoPath, "commit", "-m", "initial")
+
+	worktreePath = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(worktreePath, ".git"), []byte("gitdir: fake\n"), 0644))
+	return repoPath, worktreePath
+}
 
 // When the tmux server dies between runs, every session goes with it while the worktree
 // and branch survive on disk. Restoring such an instance must park it as Paused so the
@@ -73,4 +141,210 @@ func TestStartRestoresInstanceWhenTmuxSessionSurvives(t *testing.T) {
 	require.NoError(t, instance.Start(false))
 	require.Equal(t, Running, instance.Status)
 	require.Equal(t, 1, ptyFactory.calls)
+}
+
+// A tmux session that survived the pause is still running the program with its context, so
+// Resume must Restore it, never restart it — restarting would throw away the very
+// conversation this feature exists to preserve. This guards the plan's single most
+// emphatic invariant: swapping this Restore() call for a start-with-restart-command call
+// would otherwise compile and pass the rest of the suite silently.
+func TestResumeRestoresSurvivingSessionWithoutRestartCommand(t *testing.T) {
+	repoPath, worktreePath := newResumeTestRepo(t)
+
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd.String())
+			return nil // has-session succeeds: the session survived the pause
+		},
+	}
+	ptyFactory := &recordingPtyFactory{t: t, ran: &ran}
+	tmuxSession := tmux.NewTmuxSessionWithDeps("resume-survives", "claude", ptyFactory, cmdExec)
+	// Configure the restart command as production code would have when this instance was
+	// first created, so that "Resume does not restart" below is proven by the assertions,
+	// not merely true because the restart command was never configured in the first place.
+	tmuxSession.SetRestartCommand(restartCommandFor("claude"))
+
+	instance, err := FromInstanceData(InstanceData{
+		Title:   "resume-survives",
+		Path:    repoPath,
+		Branch:  "feature/test",
+		Status:  Paused,
+		Program: "claude",
+		Worktree: GitWorktreeData{
+			RepoPath:     repoPath,
+			WorktreePath: worktreePath,
+			SessionName:  "resume-survives",
+			BranchName:   "feature/test",
+		},
+	})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmuxSession)
+
+	require.NoError(t, instance.Resume())
+	require.Equal(t, Running, instance.Status)
+
+	require.NotEmpty(t, ran, "Resume should have reached the tmux paths, not returned early")
+	joined := strings.Join(ran, "\n")
+	require.Contains(t, joined, "attach-session", "a surviving session must be restored")
+	require.NotContains(t, joined, "new-session", "a surviving session must not be recreated")
+	require.NotContains(t, joined, "--continue",
+		"restarting a surviving session would destroy the conversation it is preserving")
+}
+
+// A session that did not survive the pause has nothing left to preserve, so the path that
+// recreates it must ask for the restart command, giving the agent back its conversation.
+func TestResumeRecreatesGoneSessionWithRestartCommand(t *testing.T) {
+	repoPath, worktreePath := newResumeTestRepo(t)
+
+	var ran []string
+	var sessionExists bool
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			s := cmd.String()
+			ran = append(ran, s)
+			if strings.Contains(s, "has-session") {
+				if sessionExists {
+					return nil
+				}
+				return fmt.Errorf("can't find session")
+			}
+			return nil
+		},
+	}
+	ptyFactory := &recordingPtyFactory{
+		t:   t,
+		ran: &ran,
+		onStart: func(s string) {
+			if strings.Contains(s, "new-session") {
+				// The session now "exists" for any has-session poll that follows.
+				sessionExists = true
+			}
+		},
+	}
+	tmuxSession := tmux.NewTmuxSessionWithDeps("resume-gone", "claude", ptyFactory, cmdExec)
+	tmuxSession.SetRestartCommand(restartCommandFor("claude"))
+
+	instance, err := FromInstanceData(InstanceData{
+		Title:   "resume-gone",
+		Path:    repoPath,
+		Branch:  "feature/test",
+		Status:  Paused,
+		Program: "claude",
+		Worktree: GitWorktreeData{
+			RepoPath:     repoPath,
+			WorktreePath: worktreePath,
+			SessionName:  "resume-gone",
+			BranchName:   "feature/test",
+		},
+	})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmuxSession)
+
+	require.NoError(t, instance.Resume())
+	require.Equal(t, Running, instance.Status)
+
+	require.NotEmpty(t, ran, "Resume should have reached the tmux paths, not returned early")
+	var newSession string
+	for _, c := range ran {
+		if strings.Contains(c, "new-session") {
+			newSession = c
+		}
+	}
+	require.NotEmpty(t, newSession, "expected a new-session command, got: %v", ran)
+	require.Contains(t, newSession, "claude --continue || claude")
+}
+
+// A restart_args value that makes the composed restart command exit immediately (a
+// non-interactive flag, "--version", ...) makes tmux new-session's poll for the session time
+// out, so StartWithRestartCommand fails exactly as if the session could never start at all.
+// Resume must retry with the plain program before falling through to gitWorktree.Cleanup(),
+// which force-removes the worktree and runs `git branch -D` — a misconfigured setting should
+// cost the user their conversation continuity, never their branch.
+//
+// worktree remove and branch -D run through real git (git.GitWorktree.Cleanup uses exec.Command
+// directly, not the mocked tmux cmdExec/ptyFactory), so a mocked command log can't prove they
+// didn't run. A real branch is created instead, and its survival is the actual assertion.
+func TestResumeFallsBackToPlainStartWhenRestartCommandFailsToStart(t *testing.T) {
+	repoPath, worktreePath := newResumeTestRepo(t)
+	mustRunGit(t, repoPath, "branch", "feature/test")
+
+	var ran []string
+	var sessionExists bool
+	attachAttempts := 0
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			s := cmd.String()
+			ran = append(ran, s)
+			switch {
+			case strings.Contains(s, "has-session"):
+				if sessionExists {
+					return nil
+				}
+				return fmt.Errorf("can't find session")
+			case strings.Contains(s, "kill-session"):
+				sessionExists = false
+				return nil
+			}
+			return nil
+		},
+	}
+	ptyFactory := &recordingPtyFactory{
+		t:   t,
+		ran: &ran,
+		onStart: func(s string) {
+			if strings.Contains(s, "new-session") {
+				sessionExists = true
+			}
+		},
+		failStart: func(s string) error {
+			if strings.Contains(s, "attach-session") {
+				attachAttempts++
+				if attachAttempts == 1 {
+					// Simulates the restart command's session dying right after creation
+					// (e.g. a quick-exiting composed command): new-session succeeded, but
+					// there is nothing left for Restore to attach to.
+					return fmt.Errorf("session died before attach")
+				}
+			}
+			return nil
+		},
+	}
+	tmuxSession := tmux.NewTmuxSessionWithDeps("resume-bad-args", "claude", ptyFactory, cmdExec)
+	tmuxSession.SetRestartCommand(restartCommandFor("claude"))
+
+	instance, err := FromInstanceData(InstanceData{
+		Title:   "resume-bad-args",
+		Path:    repoPath,
+		Branch:  "feature/test",
+		Status:  Paused,
+		Program: "claude",
+		Worktree: GitWorktreeData{
+			RepoPath:     repoPath,
+			WorktreePath: worktreePath,
+			SessionName:  "resume-bad-args",
+			BranchName:   "feature/test",
+		},
+	})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmuxSession)
+
+	require.NoError(t, instance.Resume(), "a bad restart command must fall back, not fail Resume")
+	require.Equal(t, Running, instance.Status)
+	require.Equal(t, 2, attachAttempts,
+		"expected one failed attach (restart command) and one successful attach (fallback)")
+
+	var newSessions []string
+	for _, c := range ran {
+		if strings.Contains(c, "new-session") {
+			newSessions = append(newSessions, c)
+		}
+	}
+	require.Len(t, newSessions, 2, "expected a restart-flavored attempt and a plain fallback attempt")
+	require.Contains(t, newSessions[0], "--continue", "the first attempt should carry the restart args")
+	require.NotContains(t, newSessions[1], "--continue", "the fallback attempt should be the bare program")
+
+	out := mustRunGit(t, repoPath, "branch", "--list", "feature/test")
+	require.Contains(t, out, "feature/test",
+		"the branch must survive a restart_args that only breaks the resume, not the session")
 }

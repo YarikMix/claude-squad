@@ -15,6 +15,9 @@ import (
 const (
 	ConfigFileName = "config.json"
 	defaultProgram = "claude"
+	// defaultRestartArgs matches defaultProgram: `claude --continue` resumes the most
+	// recent conversation in the worktree. Users of other agents override it.
+	defaultRestartArgs = "--continue"
 )
 
 // GetConfigDir returns the path to the application's configuration directory
@@ -44,6 +47,11 @@ type Config struct {
 	BranchPrefix string `json:"branch_prefix"`
 	// Profiles is a list of named program profiles.
 	Profiles []Profile `json:"profiles,omitempty"`
+	// RestartArgs are appended to the program when a session's process is restarted or
+	// when a session is resumed after its tmux session died. They are never used on the
+	// first start, where a fresh worktree has no conversation to continue. Applied
+	// verbatim; set to "" for programs that have no resume flag.
+	RestartArgs string `json:"restart_args"`
 }
 
 // GetProgram returns the program to run. If Profiles is non-empty and
@@ -93,6 +101,7 @@ func DefaultConfig() *Config {
 		DefaultProgram:     program,
 		AutoYes:            false,
 		DaemonPollInterval: 1000,
+		RestartArgs:        defaultRestartArgs,
 		BranchPrefix: func() string {
 			user, err := user.Current()
 			if err != nil || user == nil || user.Username == "" {
@@ -179,6 +188,20 @@ func LoadConfig() *Config {
 	if err := json.Unmarshal(data, &config); err != nil {
 		log.ErrorLog.Printf("failed to parse config file: %v", err)
 		return DefaultConfig()
+	}
+
+	// Config files written before restart_args existed have no such key, which would
+	// unmarshal to "" and silently disable restarting with a resumed conversation. An
+	// absent key means "never configured", so backfill the default and persist it; an
+	// explicit "" means the user opted out and is left alone.
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(data, &present); err == nil {
+		if _, ok := present["restart_args"]; !ok {
+			config.RestartArgs = defaultRestartArgs
+			if saveErr := saveConfig(&config); saveErr != nil {
+				log.WarningLog.Printf("failed to backfill restart_args in config: %v", saveErr)
+			}
+		}
 	}
 
 	return &config
