@@ -114,6 +114,14 @@ The menu at the bottom of the screen shows available commands:
 
 Claude Squad stores its configuration in `~/.claude-squad/config.json`. You can find the exact path by running `cs debug`.
 
+`restart_args` are appended to the program when a session is resumed after its tmux session
+died, so the agent comes back holding its previous conversation instead of starting cold. They
+are never used on a session's first start, where a fresh worktree has nothing to continue. The
+default is `--continue`, which matches Claude Code; set it to your agent's own resume flag, or
+to `""` to start without extra arguments. If your program contains shell operators (`;`, `&&`,
+`||`, `|`, ...), there is no unambiguous place to append the args, so the program is run
+unchanged and the conversation will not be continued.
+
 #### Profiles
 
 Profiles let you define multiple named program configurations and switch between them when creating a new session. When more than one profile is defined, the session creation overlay shows a profile picker that you can navigate with `←`/`→`.

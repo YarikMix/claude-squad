@@ -31,6 +31,10 @@ type TmuxSession struct {
 	// The name of the tmux session and the sanitized name used for tmux commands.
 	sanitizedName string
 	program       string
+	// restartCommand is the command used to bring the program back up on restart. It is
+	// empty for sessions that should not be restartable (the terminal tab's shell), in
+	// which case restarts fall back to the bare program.
+	restartCommand string
 	// ptyFactory is used to create a PTY for the tmux session.
 	ptyFactory PtyFactory
 	// cmdExec is used to execute commands in the tmux session.
@@ -93,16 +97,72 @@ func newTmuxSession(name string, program string, ptyFactory PtyFactory, cmdExec 
 	}
 }
 
+// SetRestartCommand sets the command used by StartWithRestartCommand.
+func (t *TmuxSession) SetRestartCommand(command string) {
+	t.restartCommand = command
+}
+
+// BuildRestartCommand composes the command that brings program back up with args appended,
+// falling back to the bare program if the args fail. tmux passes a single shell-command
+// argument to the shell, so the `||` is honored: `claude --continue` exits non-zero in a
+// worktree with no conversation on disk, and without the fallback that would take the pane
+// — and with it the tmux session — down with it.
+//
+// Returns program unchanged when args is empty, so programs with no resume flag still
+// restart normally. Args are appended only when program is a simple `program [flags]`
+// invocation: if program itself contains shell operators, there is no unambiguous place to
+// append args or make the `||` fallback cover the whole expression, so program is returned
+// unchanged in that case too.
+//
+// Only program is checked for shell operators. args is not: it is user-authored config
+// (config.RestartArgs), documented as applied verbatim, and is appended as-is even if it
+// contains its own shell syntax.
+func BuildRestartCommand(program, args string) string {
+	program = strings.TrimSpace(program)
+	args = strings.TrimSpace(args)
+	if program == "" || args == "" {
+		return program
+	}
+	// A program containing shell operators has no unambiguous place to append args:
+	// `a && b` would take them on b, and `||` would bind to the last sub-command rather
+	// than the whole expression, so the fallback would stop covering it. Restart the
+	// program as-is instead — a restart without the resume args beats a malformed command.
+	if strings.ContainsAny(program, ";&|<>()`\n") {
+		return program
+	}
+	return fmt.Sprintf("%s %s || %s", program, args, program)
+}
+
+// restartCommandOrProgram returns the configured restart command, or the bare program when
+// none is set.
+func (t *TmuxSession) restartCommandOrProgram() string {
+	if t.restartCommand == "" {
+		return t.program
+	}
+	return t.restartCommand
+}
+
 // Start creates and starts a new tmux session, then attaches to it. Program is the command to run in
 // the session (ex. claude). workdir is the git worktree directory.
 func (t *TmuxSession) Start(workDir string) error {
+	return t.start(workDir, t.program)
+}
+
+// StartWithRestartCommand creates the session running the restart command rather than the
+// bare program, so a session rebuilt after its tmux server died comes back with the
+// agent's previous conversation. Falls back to the program when no restart command is set.
+func (t *TmuxSession) StartWithRestartCommand(workDir string) error {
+	return t.start(workDir, t.restartCommandOrProgram())
+}
+
+func (t *TmuxSession) start(workDir string, command string) error {
 	// Check if the session already exists
 	if t.DoesSessionExist() {
 		return fmt.Errorf("tmux session already exists: %s", t.sanitizedName)
 	}
 
 	// Create a new detached tmux session and start claude in it
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", t.sanitizedName, "-c", workDir, t.program)
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", t.sanitizedName, "-c", workDir, command)
 
 	ptmx, err := t.ptyFactory.Start(cmd)
 	if err != nil {

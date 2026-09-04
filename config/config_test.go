@@ -303,3 +303,63 @@ func TestSaveConfig(t *testing.T) {
 		assert.Equal(t, testConfig.BranchPrefix, loadedConfig.BranchPrefix)
 	})
 }
+
+func TestRestartArgs(t *testing.T) {
+	t.Run("default is --continue, matching the default program", func(t *testing.T) {
+		assert.Equal(t, "--continue", DefaultConfig().RestartArgs)
+	})
+
+	t.Run("reads the configured value", func(t *testing.T) {
+		tempHome := t.TempDir()
+		configDir := filepath.Join(tempHome, ".claude-squad")
+		require.NoError(t, os.MkdirAll(configDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(configDir, ConfigFileName),
+			[]byte(`{"default_program": "aider", "restart_args": "--restore-chat-history"}`), 0644))
+
+		originalHome := os.Getenv("HOME")
+		os.Setenv("HOME", tempHome)
+		defer os.Setenv("HOME", originalHome)
+
+		assert.Equal(t, "--restore-chat-history", LoadConfig().RestartArgs)
+	})
+
+	// Config files written before restart_args existed have no such key. Leaving it at ""
+	// would silently disable restarting with a resumed conversation for every existing
+	// user, so an absent key is backfilled with the default and persisted.
+	t.Run("backfills the default when the key is absent", func(t *testing.T) {
+		tempHome := t.TempDir()
+		configDir := filepath.Join(tempHome, ".claude-squad")
+		require.NoError(t, os.MkdirAll(configDir, 0755))
+		configPath := filepath.Join(configDir, ConfigFileName)
+		require.NoError(t, os.WriteFile(configPath,
+			[]byte(`{"default_program": "claude", "auto_yes": false}`), 0644))
+
+		originalHome := os.Getenv("HOME")
+		os.Setenv("HOME", tempHome)
+		defer os.Setenv("HOME", originalHome)
+
+		assert.Equal(t, "--continue", LoadConfig().RestartArgs)
+
+		// The backfill is persisted, so the user can see and edit the key.
+		written, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(written), `"restart_args": "--continue"`)
+		assert.Contains(t, string(written), `"default_program": "claude"`,
+			"backfilling must not drop the rest of the config")
+	})
+
+	// An explicit "" is the documented way to opt out; it must not be overwritten.
+	t.Run("keeps an explicit empty value", func(t *testing.T) {
+		tempHome := t.TempDir()
+		configDir := filepath.Join(tempHome, ".claude-squad")
+		require.NoError(t, os.MkdirAll(configDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(configDir, ConfigFileName),
+			[]byte(`{"default_program": "claude", "restart_args": ""}`), 0644))
+
+		originalHome := os.Getenv("HOME")
+		os.Setenv("HOME", tempHome)
+		defer os.Setenv("HOME", originalHome)
+
+		assert.Equal(t, "", LoadConfig().RestartArgs)
+	})
+}
