@@ -163,7 +163,9 @@ func (p *PreviewPane) String() string {
 	// Calculate available height accounting for border and margin
 	availableHeight := p.height - 1 //  1 for ellipsis
 
-	lines := strings.Split(p.previewState.text, "\n")
+	// Strip OSC sequences first: their invisible payload is counted as visible text by the
+	// width helpers below, which would make this pane report itself wider than it is.
+	lines := strings.Split(stripOSCSequences(p.previewState.text), "\n")
 
 	// Truncate if we have more lines than available height
 	if availableHeight > 0 {

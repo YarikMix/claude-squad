@@ -283,8 +283,9 @@ func (t *TerminalPane) String() string {
 			Render(strings.Join(lines, ""))
 	}
 
-	// Normal mode: show captured content
-	lines := strings.Split(content, "\n")
+	// Normal mode: show captured content. Strip OSC sequences first — see the preview pane
+	// for why an unstripped hyperlink makes this pane measure wider than it renders.
+	lines := strings.Split(stripOSCSequences(content), "\n")
 
 	if height > 0 {
 		if len(lines) > height {
