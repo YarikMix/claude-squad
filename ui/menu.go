@@ -49,6 +49,13 @@ type Menu struct {
 	instance      *session.Instance
 	activeTab     int
 
+	// actionGroupStart and actionGroupEnd delimit the action group within options. They are
+	// set at the top of every updateOptions() call, before the state switch, so that every
+	// state has well-defined boundaries even if it does not build an action group of its
+	// own; addInstanceOptions then overwrites them for the states that do build one. This
+	// keeps adding an option from shifting the highlighted range or the group separators.
+	actionGroupStart, actionGroupEnd int
+
 	// keyDown is the key which is pressed. The default is -1.
 	keyDown keys.KeyName
 }
@@ -59,10 +66,12 @@ var promptMenuOptions = []keys.KeyName{keys.KeySubmitName}
 
 func NewMenu() *Menu {
 	return &Menu{
-		options:   defaultMenuOptions,
-		state:     StateEmpty,
-		activeTab: 0,
-		keyDown:   -1,
+		options:          defaultMenuOptions,
+		state:            StateEmpty,
+		activeTab:        0,
+		actionGroupStart: 2,
+		actionGroupEnd:   5,
+		keyDown:          -1,
 	}
 }
 
@@ -102,6 +111,11 @@ func (m *Menu) SetActiveTab(tab int) {
 
 // updateOptions updates the menu options based on current state and instance
 func (m *Menu) updateOptions() {
+	// Default to the boundaries the non-instance states have always used. Every path
+	// through this switch therefore leaves them well-defined; addInstanceOptions
+	// overwrites them for states that build an action group of their own.
+	m.actionGroupStart, m.actionGroupEnd = 2, 5
+
 	switch m.state {
 	case StateEmpty:
 		m.options = defaultMenuOptions
@@ -135,7 +149,8 @@ func (m *Menu) addInstanceOptions() {
 	if m.instance.Status == session.Paused {
 		actionGroup = append(actionGroup, keys.KeyResume)
 	} else {
-		actionGroup = append(actionGroup, keys.KeyCheckout)
+		// Restarting respawns the pane's process, which a paused instance does not have.
+		actionGroup = append(actionGroup, keys.KeyCheckout, keys.KeyRestart)
 	}
 
 	// Navigation group (when in diff tab)
@@ -147,7 +162,9 @@ func (m *Menu) addInstanceOptions() {
 	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeyHelp, keys.KeyQuit}
 
 	// Combine all groups
+	m.actionGroupStart = len(options)
 	options = append(options, actionGroup...)
+	m.actionGroupEnd = len(options)
 	options = append(options, systemGroup...)
 
 	m.options = options
@@ -167,9 +184,9 @@ func (m *Menu) String() string {
 		start int
 		end   int
 	}{
-		{0, 2}, // Instance management group (n, d)
-		{2, 5}, // Action group (enter, submit, pause/resume)
-		{6, 8}, // System group (tab, help, q)
+		{0, 2},                                 // Instance management group (n, d)
+		{m.actionGroupStart, m.actionGroupEnd}, // Action group (enter, submit, checkout/resume, restart)
+		{m.actionGroupEnd, len(m.options)},     // System group (tab, help, q)
 	}
 
 	for i, k := range m.options {

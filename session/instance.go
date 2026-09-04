@@ -622,6 +622,34 @@ func (i *Instance) startWithRestartFallback(workdir string) error {
 	return nil
 }
 
+// Restart replaces the program running in the session's pane, appending the configured
+// restart args so the agent comes back with its previous conversation. The tmux session,
+// the git worktree and the branch are left untouched, and a user attached to the pane stays
+// attached.
+func (i *Instance) Restart() error {
+	if !i.started {
+		return fmt.Errorf("cannot restart instance that has not been started")
+	}
+	if i.Status == Paused {
+		return fmt.Errorf("cannot restart a paused session: press 'r' to resume it first")
+	}
+	// Respawning a pane of a session that no longer exists cannot work. Point the user at
+	// Resume, which rebuilds the session from the branch. Park the instance as Paused first
+	// (mirroring Start's !firstTimeSetup branch for the same condition) so that advice is
+	// actually actionable: Resume refuses to run on anything but a Paused instance.
+	if !i.tmuxSession.DoesSessionExist() {
+		i.SetStatus(Paused)
+		return fmt.Errorf("tmux session for '%s' no longer exists: press 'r' to resume it", i.Title)
+	}
+	// Re-read the args so a config edit applies without restarting claude-squad.
+	i.tmuxSession.SetRestartCommand(restartCommandFor(i.Program))
+	if err := i.tmuxSession.RespawnPane(); err != nil {
+		return fmt.Errorf("failed to restart session '%s': %w", i.Title, err)
+	}
+	i.SetStatus(Running)
+	return nil
+}
+
 // UpdateDiffStats updates the git diff statistics for this instance
 func (i *Instance) UpdateDiffStats() error {
 	if !i.started {
