@@ -357,11 +357,11 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 		m.keySent = false
 		return nil, false
 	}
-	if m.state == statePrompt || m.state == stateHelp || m.state == stateConfirm {
+	if m.state == stateNew || m.state == statePrompt || m.state == stateHelp || m.state == stateConfirm {
 		return nil, false
 	}
 	// If it's in the global keymap, we should try to highlight it.
-	name, ok := keys.GlobalKeyStringsMap[msg.String()]
+	name, ok := keys.GetKeyName(msg.String())
 	if !ok {
 		return nil, false
 	}
@@ -596,12 +596,13 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		}
 	}
 
-	// Handle quit commands first
-	if msg.String() == "ctrl+c" || msg.String() == "q" {
+	// Handle quit commands first. This runs before the keymap lookup below, so the Cyrillic
+	// key sharing q's position is listed here explicitly.
+	if msg.String() == "ctrl+c" || msg.String() == "q" || msg.String() == "й" {
 		return m.handleQuit()
 	}
 
-	name, ok := keys.GlobalKeyStringsMap[msg.String()]
+	name, ok := keys.GetKeyName(msg.String())
 	if !ok {
 		return m, nil
 	}

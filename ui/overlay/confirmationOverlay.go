@@ -1,6 +1,8 @@
 package overlay
 
 import (
+	"claude-squad/keys"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -40,7 +42,10 @@ func NewConfirmationOverlay(message string) *ConfirmationOverlay {
 // HandleKeyPress processes a key press and updates the state
 // Returns true if the overlay should be closed
 func (c *ConfirmationOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
-	switch msg.String() {
+	// Compare by physical key, so the y and n this dialog advertises are answered by the keys
+	// carrying those labels whatever layout is active. On a Russian layout that means н
+	// confirms and т cancels — the keys sitting where y and n sit.
+	switch keys.ToLatin(msg.String()) {
 	case c.ConfirmKey:
 		c.Dismissed = true
 		if c.OnConfirm != nil {
