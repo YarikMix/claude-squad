@@ -59,6 +59,57 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"?":          KeyHelp,
 }
 
+// cyrillicToLatin maps every Cyrillic character to the one the same physical key produces on
+// a US layout. Shortcuts are matched by key position rather than by letter, so `В` runs the
+// same action as `D` — it is the same key on the keyboard — and a user working in Russian
+// does not have to switch layout to drive the UI.
+//
+// The map covers the whole alphabet, not just the keys bound today, so a binding added later
+// works in both layouts without anyone having to remember this file. TestEveryLetterBinding
+// IsReachableFromCyrillic is the guard for that.
+var cyrillicToLatin = map[string]string{
+	// ЙЦУКЕНГШЩЗХЪ
+	"й": "q", "ц": "w", "у": "e", "к": "r", "е": "t", "н": "y",
+	"г": "u", "ш": "i", "щ": "o", "з": "p", "х": "[", "ъ": "]",
+	"Й": "Q", "Ц": "W", "У": "E", "К": "R", "Е": "T", "Н": "Y",
+	"Г": "U", "Ш": "I", "Щ": "O", "З": "P", "Х": "{", "Ъ": "}",
+
+	// ФЫВАПРОЛДЖЭ
+	"ф": "a", "ы": "s", "в": "d", "а": "f", "п": "g", "р": "h",
+	"о": "j", "л": "k", "д": "l", "ж": ";", "э": "'",
+	"Ф": "A", "Ы": "S", "В": "D", "А": "F", "П": "G", "Р": "H",
+	"О": "J", "Л": "K", "Д": "L", "Ж": ":", "Э": "\"",
+
+	// ЯЧСМИТЬБЮ
+	"я": "z", "ч": "x", "с": "c", "м": "v", "и": "b", "т": "n",
+	"ь": "m", "б": ",", "ю": ".", "ё": "`",
+	"Я": "Z", "Ч": "X", "С": "C", "М": "V", "И": "B", "Т": "N",
+	"Ь": "M", "Б": "<", "Ю": ">", "Ё": "~",
+}
+
+// ToLatin returns the character the pressed key produces on a US layout, so a key press can
+// be compared against a Latin binding whatever layout is active. Anything that is not a
+// Cyrillic character — a Latin one, or a named key such as "esc" — is returned unchanged.
+//
+// Matching by position rather than by letter is what lets the UI keep advertising one set of
+// shortcuts: a prompt that says "press n" means the key labelled N, and that key answers to
+// it in either layout.
+func ToLatin(key string) string {
+	if latin, ok := cyrillicToLatin[key]; ok {
+		return latin
+	}
+	return key
+}
+
+// GetKeyName resolves a key press to the action it triggers, accepting either layout.
+//
+// The second return value reports whether the key is bound at all; callers must check it,
+// since the zero KeyName is a real action.
+func GetKeyName(key string) (KeyName, bool) {
+	name, ok := GlobalKeyStringsMap[ToLatin(key)]
+	return name, ok
+}
+
 // GlobalkeyBindings is a global, immutable map of KeyName tot keybinding.
 var GlobalkeyBindings = map[KeyName]key.Binding{
 	KeyUp: key.NewBinding(
