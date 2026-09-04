@@ -59,7 +59,7 @@ detect_platform_and_arch() {
 
 get_latest_version() {
     # Get latest version from GitHub API, including prereleases
-    API_RESPONSE=$(curl -sS "https://api.github.com/repos/smtg-ai/claude-squad/releases")
+    API_RESPONSE=$(curl -sS "https://api.github.com/repos/YarikMix/claude-squad/releases")
     if [ $? -ne 0 ]; then
         echo "Failed to connect to GitHub API"
         exit 1
@@ -296,7 +296,7 @@ main() {
         VERSION=$(get_latest_version)
     fi
 
-    RELEASE_URL="https://github.com/smtg-ai/claude-squad/releases/download/v${VERSION}"
+    RELEASE_URL="https://github.com/YarikMix/claude-squad/releases/download/v${VERSION}"
     ARCHIVE_NAME="claude-squad_${VERSION}_${PLATFORM}_${ARCHITECTURE}${ARCHIVE_EXT}"
     BINARY_URL="${RELEASE_URL}/${ARCHIVE_NAME}"
     TMP_DIR=$(mktemp -d)
