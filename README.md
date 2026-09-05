@@ -1,7 +1,13 @@
-# Claude Squad [![CI](https://github.com/smtg-ai/claude-squad/actions/workflows/build.yml/badge.svg)](https://github.com/smtg-ai/claude-squad/actions/workflows/build.yml) [![GitHub Release](https://img.shields.io/github/v/release/smtg-ai/claude-squad)](https://github.com/smtg-ai/claude-squad/releases/latest)
+# Claude Squad [![CI](https://github.com/YarikMix/claude-squad/actions/workflows/build.yml/badge.svg)](https://github.com/YarikMix/claude-squad/actions/workflows/build.yml) [![GitHub Release](https://img.shields.io/github/v/release/YarikMix/claude-squad)](https://github.com/YarikMix/claude-squad/releases/latest)
 
 [Claude Squad](https://smtg-ai.github.io/claude-squad/) is a terminal app that manages multiple [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [Gemini](https://github.com/google-gemini/gemini-cli) (and other local agents including [Aider](https://github.com/Aider-AI/aider)) in separate workspaces, allowing you to work on multiple tasks simultaneously.
 
+
+> **This is a modified fork** of [smtg-ai/claude-squad](https://github.com/smtg-ai/claude-squad),
+> maintained at [YarikMix/claude-squad](https://github.com/YarikMix/claude-squad). It adds
+> conversation continuity when a session is rebuilt, a restart hotkey, Cyrillic keyboard
+> layout support, and several fixes. Releases here are built from this repository and are
+> versioned separately from upstream.
 
 ![Claude Squad Screenshot](assets/screenshot.png)
 
@@ -19,21 +25,25 @@ https://github.com/user-attachments/assets/aef18253-e58f-4525-9032-f5a3d66c975a
 
 ### Installation
 
-Both Homebrew and manual installation will install Claude Squad as `cs` on your system.
+The manual installation below installs this fork as `cs` on your system.
 
 #### Homebrew
 
+Homebrew carries the upstream project, not this fork:
+
 ```bash
-brew install claude-squad
-ln -s "$(brew --prefix)/bin/claude-squad" "$(brew --prefix)/bin/cs"
+brew install claude-squad   # installs smtg-ai/claude-squad, without this fork's changes
 ```
+
+To get this fork, use the manual install below. It puts the binary in `~/.local/bin`, which
+most shells search before Homebrew's directory, so it takes precedence if you have both.
 
 #### Manual
 
 Claude Squad can also be installed by running the following command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/YarikMix/claude-squad/main/install.sh | bash
 ```
 
 This puts the `cs` binary in `~/.local/bin`.
@@ -41,7 +51,7 @@ This puts the `cs` binary in `~/.local/bin`.
 To use a custom name for the binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash -s -- --name <your-binary-name>
+curl -fsSL https://raw.githubusercontent.com/YarikMix/claude-squad/main/install.sh | bash -s -- --name <your-binary-name>
 ```
 
 ### Prerequisites
