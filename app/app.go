@@ -714,44 +714,6 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		// Show confirmation modal
 		message := fmt.Sprintf("[!] Kill session '%s'?", selected.Title)
 		return m, m.confirmAction(message, killAction)
-	case keys.KeySubmit:
-		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
-			return m, nil
-		}
-
-		// Create the push action as a tea.Cmd
-		pushAction := func() tea.Msg {
-			// Default commit message with timestamp
-			commitMsg := fmt.Sprintf("[claudesquad] update from '%s' on %s", selected.Title, time.Now().Format(time.RFC822))
-			worktree, err := selected.GetGitWorktree()
-			if err != nil {
-				return err
-			}
-			if err = worktree.PushChanges(commitMsg, true); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		// Show confirmation modal
-		message := fmt.Sprintf("[!] Push changes from session '%s'?", selected.Title)
-		return m, m.confirmAction(message, pushAction)
-	case keys.KeyCheckout:
-		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
-			return m, nil
-		}
-
-		// Show help screen before pausing
-		m.showHelpScreen(helpTypeInstanceCheckout{}, func() {
-			if err := selected.Pause(); err != nil {
-				m.handleError(err)
-			}
-			m.tabbedWindow.CleanupTerminalForInstance(selected.Title)
-			m.instanceChanged()
-		})
-		return m, nil
 	case keys.KeyMoveUp:
 		if m.list.MoveUp() {
 			if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {

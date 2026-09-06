@@ -9,11 +9,8 @@ import (
 	"path/filepath"
 
 	"fmt"
-	"os"
 	"strings"
 	"time"
-
-	"github.com/atotto/clipboard"
 )
 
 type Status int
@@ -436,93 +433,6 @@ func (i *Instance) Paused() bool {
 // TmuxAlive returns true if the tmux session is alive. This is a sanity check before attaching.
 func (i *Instance) TmuxAlive() bool {
 	return i.tmuxSession.DoesSessionExist()
-}
-
-// Pause stops the tmux session and removes the worktree, preserving the branch
-func (i *Instance) Pause() error {
-	if !i.started {
-		return fmt.Errorf("cannot pause instance that has not been started")
-	}
-	if i.Status == Paused {
-		return fmt.Errorf("instance is already paused")
-	}
-
-	var errs []error
-
-	// If the worktree is orphaned (path or .git missing), git cannot operate
-	// on it. Skip dirty check and Remove, prune any lingering metadata, then
-	// transition to Paused so the user can recover via Resume.
-	if valid, err := i.gitWorktree.IsValidWorktree(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to validate worktree: %w", err))
-		log.ErrorLog.Print(err)
-	} else if !valid {
-		log.WarningLog.Printf("worktree at %s is orphaned; skipping dirty check and remove",
-			i.gitWorktree.GetWorktreePath())
-		if err := i.tmuxSession.DetachSafely(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to detach tmux session: %w", err))
-			log.ErrorLog.Print(err)
-		}
-		// Drop any leftover directory so a future Resume's `git worktree add` won't conflict.
-		if err := os.RemoveAll(i.gitWorktree.GetWorktreePath()); err != nil {
-			errs = append(errs, fmt.Errorf("failed to remove orphaned worktree directory: %w", err))
-			log.ErrorLog.Print(err)
-		}
-		if err := i.gitWorktree.Prune(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to prune git worktrees: %w", err))
-			log.ErrorLog.Print(err)
-		}
-		i.SetStatus(Paused)
-		_ = clipboard.WriteAll(i.gitWorktree.GetBranchName())
-		return i.combineErrors(errs)
-	}
-
-	// Check if there are any changes to commit
-	if dirty, err := i.gitWorktree.IsDirty(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to check if worktree is dirty: %w", err))
-		log.ErrorLog.Print(err)
-	} else if dirty {
-		// Commit changes locally (without pushing to GitHub)
-		commitMsg := fmt.Sprintf("[claudesquad] update from '%s' on %s (paused)", i.Title, time.Now().Format(time.RFC822))
-		if err := i.gitWorktree.CommitChanges(commitMsg); err != nil {
-			errs = append(errs, fmt.Errorf("failed to commit changes: %w", err))
-			log.ErrorLog.Print(err)
-			// Return early if we can't commit changes to avoid corrupted state
-			return i.combineErrors(errs)
-		}
-	}
-
-	// Detach from tmux session instead of closing to preserve session output
-	if err := i.tmuxSession.DetachSafely(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to detach tmux session: %w", err))
-		log.ErrorLog.Print(err)
-		// Continue with pause process even if detach fails
-	}
-
-	// Check if worktree exists before trying to remove it
-	if _, err := os.Stat(i.gitWorktree.GetWorktreePath()); err == nil {
-		// Remove worktree but keep branch
-		if err := i.gitWorktree.Remove(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to remove git worktree: %w", err))
-			log.ErrorLog.Print(err)
-			return i.combineErrors(errs)
-		}
-
-		// Only prune if remove was successful
-		if err := i.gitWorktree.Prune(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to prune git worktrees: %w", err))
-			log.ErrorLog.Print(err)
-			return i.combineErrors(errs)
-		}
-	}
-
-	i.SetStatus(Paused)
-	_ = clipboard.WriteAll(i.gitWorktree.GetBranchName())
-
-	if err := i.combineErrors(errs); err != nil {
-		log.ErrorLog.Print(err)
-		return err
-	}
-	return nil
 }
 
 // Resume recreates the worktree and restarts the tmux session

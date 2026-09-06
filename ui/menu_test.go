@@ -28,8 +28,8 @@ func newTestInstance(t *testing.T, status session.Status) *session.Instance {
 
 func TestMenuString(t *testing.T) {
 	const (
-		running = "n new • D kill │ ↵/o open • p push branch • c checkout • R restart │ tab switch tab • ? help • q quit"
-		paused  = "n new • D kill │ ↵/o open • p push branch • r resume │ tab switch tab • ? help • q quit"
+		running = "n new • D kill │ ↵/o open • R restart │ tab switch tab • ? help • q quit"
+		paused  = "n new • D kill │ ↵/o open • r resume │ tab switch tab • ? help • q quit"
 		empty   = "n new • N new with prompt │ ? help • q quit"
 		// Loading instances get the minimal option set (new/help/quit) rendered with the
 		// default action-group boundary (2,5). Index 2 ("q quit") falls inside [2,5) and

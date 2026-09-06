@@ -15,8 +15,6 @@ func TestCyrillicKeysResolveToTheSameAction(t *testing.T) {
 		{"n", "т"}, {"N", "Т"},
 		{"D", "В"},
 		{"o", "щ"},
-		{"p", "з"},
-		{"c", "с"},
 		{"r", "к"}, {"R", "К"},
 		{"q", "й"},
 		{"j", "о"}, {"k", "л"},
@@ -65,5 +63,15 @@ func TestEveryLetterBindingIsReachableFromCyrillic(t *testing.T) {
 		}
 		require.Contains(t, latinToCyrillic, key,
 			"binding %q has no Cyrillic equivalent: add its physical key to cyrillicToLatin", key)
+	}
+}
+
+// Pushing and checking out were removed: the agent inside the session commits and pushes,
+// and the work is read in GitLab rather than in a local worktree. The keys must not resolve,
+// or the menu would advertise commands that no longer exist.
+func TestRemovedKeysAreUnbound(t *testing.T) {
+	for _, key := range []string{"p", "c", "з", "с"} {
+		_, ok := GetKeyName(key)
+		require.False(t, ok, "%q should no longer be bound", key)
 	}
 }
