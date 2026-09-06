@@ -78,6 +78,30 @@ func toClaudeSquadTmuxName(str string) string {
 	return fmt.Sprintf("%s%s", TmuxPrefix, str)
 }
 
+// windowName is the instance's name as tmux stores it, without the prefix that marks the
+// session as ours. It is what the status line shows for the window.
+func (t *TmuxSession) windowName() string {
+	return strings.TrimPrefix(t.sanitizedName, TmuxPrefix)
+}
+
+// nameWindow labels the window after the instance rather than after whatever process happens
+// to be running in it. Left to itself tmux renames the window on every exec, so a pane
+// restarted through the shell that carries the `|| program` fallback ends up called "zsh".
+//
+// The window is also the only field with room to identify the session: status-left is capped
+// at ten characters by default, and every session name here opens with the same twelve-
+// character prefix, so the session's own name never survives the truncation.
+//
+// Naming a window explicitly also turns tmux's automatic renaming off for it, so this holds
+// across later respawns. Failure is logged rather than returned: a window's label is not
+// worth failing a session over.
+func (t *TmuxSession) nameWindow() {
+	cmd := exec.Command("tmux", "rename-window", "-t", t.sanitizedName, t.windowName())
+	if err := t.cmdExec.Run(cmd); err != nil {
+		log.InfoLog.Printf("Warning: failed to name window for session %s: %v", t.sanitizedName, err)
+	}
+}
+
 // NewTmuxSession creates a new TmuxSession with the given name and program.
 func NewTmuxSession(name string, program string) *TmuxSession {
 	return newTmuxSession(name, program, MakePtyFactory(), cmd.MakeExecutor())
@@ -155,6 +179,7 @@ func (t *TmuxSession) RespawnPane() error {
 	if err := t.cmdExec.Run(cmd); err != nil {
 		return fmt.Errorf("error respawning tmux pane for session %s: %w", t.sanitizedName, err)
 	}
+	t.nameWindow()
 	return nil
 }
 
@@ -224,6 +249,8 @@ func (t *TmuxSession) start(workDir string, command string) error {
 		log.InfoLog.Printf("Warning: failed to enable mouse scrolling for session %s: %v", t.sanitizedName, err)
 	}
 
+	t.nameWindow()
+
 	err = t.Restore()
 	if err != nil {
 		if cleanupErr := t.Close(); cleanupErr != nil {
@@ -277,6 +304,10 @@ func (t *TmuxSession) Restore() error {
 	}
 	t.ptmx = ptmx
 	t.monitor = newStatusMonitor()
+	// Reconnecting is also the moment to relabel: a session that predates this naming, or
+	// that tmux renamed while claude-squad was not running, would otherwise keep whatever
+	// name the last exec left it with.
+	t.nameWindow()
 	return nil
 }
 
