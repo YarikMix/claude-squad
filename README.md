@@ -117,7 +117,7 @@ The menu at the bottom of the screen shows available commands:
 ##### Navigation
 - `tab` - Switch between preview and terminal tabs
 - `q` - Quit the application
-- `shift-↓/↑` - scroll in diff view
+- `shift-↓/↑` - scroll in preview/terminal view
 
 ### Configuration
 
