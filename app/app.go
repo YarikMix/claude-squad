@@ -89,7 +89,7 @@ type home struct {
 	list *ui.List
 	// menu displays the bottom menu
 	menu *ui.Menu
-	// tabbedWindow displays the tabbed window with preview and diff panes
+	// tabbedWindow displays the tabbed window with preview and terminal panes
 	tabbedWindow *ui.TabbedWindow
 	// errBox displays error messages
 	errBox *ui.ErrBox
@@ -259,7 +259,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tickUpdateMetadataCmd(m.snapshotActiveInstances(), m.list.GetSelectedInstance())
 	case tea.MouseMsg:
-		// Handle mouse wheel events for scrolling the diff/preview pane
+		// Handle mouse wheel events for scrolling the preview/terminal pane
 		if msg.Action == tea.MouseActionPress {
 			if msg.Button == tea.MouseButtonWheelDown || msg.Button == tea.MouseButtonWheelUp {
 				selected := m.list.GetSelectedInstance()
@@ -576,7 +576,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	}
 
 	// Exit scrolling mode when ESC is pressed and preview pane is in scrolling mode
-	// Check if Escape key was pressed and we're not in the diff tab (meaning we're in preview tab)
+	// Check if Escape key was pressed while in the preview or terminal tab
 	// Always check for escape key first to ensure it doesn't get intercepted elsewhere
 	if msg.Type == tea.KeyEsc {
 		// If in preview tab and in scroll mode, exit scroll mode
@@ -832,7 +832,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	}
 }
 
-// instanceChanged updates the preview pane, menu, and diff pane based on the selected instance. It returns an error
+// instanceChanged updates the preview pane, menu, and terminal pane based on the selected instance. It returns an error
 // Cmd if there was any error.
 func (m *home) instanceChanged() tea.Cmd {
 	// selected may be nil
@@ -966,8 +966,7 @@ func (m *home) snapshotActiveInstances() []*session.Instance {
 // snapshotActiveInstances() before being passed here.
 //
 // Only the selected instance gets a full diff (with Content); the rest get a
-// lightweight numstat-only summary. This keeps per-instance memory bounded
-// since the diff pane only ever renders the selected one.
+// lightweight numstat-only summary. This keeps per-instance memory bounded.
 func tickUpdateMetadataCmd(active []*session.Instance, selected *session.Instance) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(500 * time.Millisecond)
