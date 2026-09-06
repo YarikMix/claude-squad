@@ -345,3 +345,100 @@ func TestStartIgnoresRestartCommand(t *testing.T) {
 	require.Equal(t, fmt.Sprintf("tmux new-session -d -s claudesquad_fresh -c %s claude", workdir),
 		cmd2.ToString(ptyFactory.cmds[0]))
 }
+
+// tmux names a window after whatever process is running in it, which for a restarted pane is
+// the shell wrapping the `||` fallback — so the status line reads "zsh" and says nothing
+// about the session. It is the only field with room to say anything: status-left is capped
+// at ten characters by default, and every session name here begins with the same twelve-
+// character "claudesquad_" prefix, so the session's own name never survives the truncation.
+func TestWindowNameIsTheInstanceTitle(t *testing.T) {
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd2.ToString(cmd))
+			return nil
+		},
+	}
+
+	session := NewTmuxSessionWithDeps("cloudweb-21182", "claude", NewMockPtyFactory(t), cmdExec)
+	session.SetRestartCommand("claude --continue || claude")
+
+	require.NoError(t, session.RespawnPane())
+	require.Contains(t, ran,
+		"tmux rename-window -t claudesquad_cloudweb-21182 cloudweb-21182",
+		"a respawned pane must be renamed back, got: %v", ran)
+}
+
+// A session created by Resume runs the same shell wrapper, so it needs the name too.
+func TestStartNamesTheWindow(t *testing.T) {
+	var ran []string
+	created := false
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd2.ToString(cmd))
+			if strings.Contains(cmd.String(), "has-session") && !created {
+				created = true
+				return fmt.Errorf("session does not exist yet")
+			}
+			return nil
+		},
+		OutputFunc: func(cmd *exec.Cmd) ([]byte, error) { return []byte("output"), nil },
+	}
+
+	session := newTmuxSession("duty", "claude", NewMockPtyFactory(t), cmdExec)
+	require.NoError(t, session.Start(t.TempDir()))
+	require.Contains(t, ran, "tmux rename-window -t claudesquad_duty duty")
+}
+
+// The window name is derived by stripping the prefix the session name carries, so a title
+// that the sanitizer rewrote must come back the way tmux stores it rather than as the
+// original string.
+func TestWindowNameStripsOnlyThePrefix(t *testing.T) {
+	for _, tc := range []struct{ title, want string }{
+		{"duty", "duty"},
+		{"cloudweb-21182", "cloudweb-21182"},
+		{"my session", "mysession"},  // the sanitizer removes whitespace
+		{"feature.v2", "feature_v2"}, // and rewrites dots, as tmux itself does
+	} {
+		session := NewTmuxSession(tc.title, "claude")
+		require.Equal(t, tc.want, session.windowName(), "title %q", tc.title)
+	}
+}
+
+// Sessions that predate this naming — or that tmux renamed while claude-squad was not
+// running — are relabelled when the app reconnects to them, so an existing session does not
+// keep reading "zsh" until someone thinks to restart it.
+func TestRestoreNamesTheWindow(t *testing.T) {
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd2.ToString(cmd))
+			return nil
+		},
+	}
+
+	session := NewTmuxSessionWithDeps("astra-mcp", "claude", NewMockPtyFactory(t), cmdExec)
+	require.NoError(t, session.Restore())
+	require.Contains(t, ran, "tmux rename-window -t claudesquad_astra-mcp astra-mcp")
+}
+
+// A session that is gone must not be renamed: there is nothing to rename, and the caller
+// needs the error rather than a stray tmux command.
+func TestRestoreDoesNotNameAMissingWindow(t *testing.T) {
+	var ran []string
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			ran = append(ran, cmd2.ToString(cmd))
+			if strings.Contains(cmd.String(), "has-session") {
+				return fmt.Errorf("can't find session")
+			}
+			return nil
+		},
+	}
+
+	session := NewTmuxSessionWithDeps("gone", "claude", NewMockPtyFactory(t), cmdExec)
+	require.ErrorIs(t, session.Restore(), ErrSessionNotFound)
+	for _, c := range ran {
+		require.NotContains(t, c, "rename-window", "nothing to rename when the session is gone")
+	}
+}
