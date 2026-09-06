@@ -572,7 +572,7 @@ func (i *Instance) UpdateDiffStats() error {
 		return nil
 	}
 
-	stats := i.gitWorktree.Diff()
+	stats := i.gitWorktree.DiffNumstat()
 	if stats.Error != nil {
 		if strings.Contains(stats.Error.Error(), "base commit SHA not set") {
 			// Worktree is not fully set up yet, not an error
@@ -584,15 +584,6 @@ func (i *Instance) UpdateDiffStats() error {
 
 	i.diffStats = stats
 	return nil
-}
-
-// ComputeDiff runs the expensive git diff I/O and returns the result without
-// mutating instance state. Safe to call from a background goroutine.
-func (i *Instance) ComputeDiff() *git.DiffStats {
-	if !i.started || i.Status == Paused {
-		return nil
-	}
-	return i.gitWorktree.Diff()
 }
 
 // ComputeDiffNumstat runs a lightweight git diff --numstat and returns only the

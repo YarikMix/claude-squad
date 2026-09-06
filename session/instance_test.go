@@ -3,6 +3,7 @@ package session
 import (
 	"claude-squad/cmd/cmd_test"
 	"claude-squad/log"
+	"claude-squad/session/git"
 	"claude-squad/session/tmux"
 	"fmt"
 	"os"
@@ -483,4 +484,47 @@ func TestResumeFallsBackToPlainStartWhenRestartCommandFailsToStart(t *testing.T)
 	out := mustRunGit(t, repoPath, "branch", "--list", "feature/test")
 	require.Contains(t, out, "feature/test",
 		"the branch must survive a restart_args that only breaks the resume, not the session")
+}
+
+// Statistics are gathered with git diff --numstat, which reports counts and no text. The
+// full diff was rendered only for the tab that has been removed, so computing it would be
+// work whose result nothing reads.
+//
+// NewInstance + Start(false) never assigns a gitWorktree -- that only happens on first-time
+// setup (Start(true)) or via FromInstanceData for a restored instance -- so driving
+// UpdateDiffStats on a bare Start(false) instance dereferences a nil *git.GitWorktree. Build a
+// real repo with one commit and point the instance's gitWorktree at it directly; the same
+// directory can stand in for both "repo" and "worktree" since Diff/DiffNumstat only ever touch
+// worktreePath and the base commit SHA.
+func TestUpdateDiffStatsDoesNotComputeDiffText(t *testing.T) {
+	repoPath := t.TempDir()
+	mustRunGit(t, "", "init", repoPath)
+	mustRunGit(t, repoPath, "config", "user.name", "Test User")
+	mustRunGit(t, repoPath, "config", "user.email", "test@example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0644))
+	mustRunGit(t, repoPath, "add", "README.md")
+	mustRunGit(t, repoPath, "commit", "-m", "initial")
+	baseSHA := strings.TrimSpace(mustRunGit(t, repoPath, "rev-parse", "HEAD"))
+
+	// A real change against the base commit, so there is something for git diff to report.
+	require.NoError(t, os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\nworld\n"), 0644))
+
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error { return nil },
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "stats", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("stats", "claude", &nullPtyFactory{t: t}, cmdExec))
+	require.NoError(t, instance.Start(false))
+	instance.gitWorktree = git.NewGitWorktreeFromStorage(repoPath, repoPath, "stats", "master", baseSHA, true)
+
+	// Start(false) parks an instance whose session is missing; drive the statistics path
+	// directly rather than through the status machinery.
+	instance.SetStatus(Running)
+	_ = instance.UpdateDiffStats()
+
+	require.NotNil(t, instance.GetDiffStats(), "statistics should still be produced")
+	require.Empty(t, instance.GetDiffStats().Content,
+		"numstat reports counts only; nothing renders diff text any more")
 }
