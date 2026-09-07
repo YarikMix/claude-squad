@@ -301,10 +301,10 @@ func (t *TerminalPane) String() string {
 	// for why an unstripped hyperlink makes this pane measure wider than it renders.
 	//
 	// Render before clamping: the style wraps overlong lines, so a block clamped first would
-	// grow back past the pane height. See fitHeight. A live session shows its newest output,
+	// grow back past the pane height. See fitBox. A live session shows its newest output,
 	// so an overlong capture keeps its tail.
 	rendered := terminalPaneStyle.Width(width).Render(stripOSCSequences(content))
-	return fitHeight(rendered, height, true, "")
+	return fitBox(rendered, width, height, true, "")
 }
 
 // enterScrollMode captures the full terminal history and enters scroll mode.
