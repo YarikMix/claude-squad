@@ -93,3 +93,42 @@ func (g *GitWorktree) IsBranchCheckedOut() (bool, error) {
 	}
 	return strings.TrimSpace(string(output)) == g.branchName, nil
 }
+
+// DirtyFileCount reports how many files in the worktree have uncommitted changes, counting
+// modified, staged and untracked files alike.
+//
+// Killing a session removes its worktree with `git worktree remove -f`, and the -f exists
+// precisely to override git's refusal to remove a worktree holding uncommitted work. The count
+// lets the confirmation say what that will destroy.
+func (g *GitWorktree) DirtyFileCount() (int, error) {
+	output, err := g.runGitCommand(g.worktreePath, "status", "--porcelain")
+	if err != nil {
+		return 0, fmt.Errorf("failed to check worktree status: %w", err)
+	}
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return 0, nil
+	}
+	// --porcelain emits exactly one line per file, whatever the status codes or the
+	// path contain, so lines are the only safe thing to count.
+	return len(strings.Split(trimmed, "\n")), nil
+}
+
+// UnpushedCommitCount reports how many commits reachable from the worktree's HEAD are on no
+// remote branch.
+//
+// Killing a session also deletes its branch with `git branch -D`, which discards commits that
+// were never published. The check deliberately asks about remote refs rather than an upstream:
+// a session branch usually has no upstream configured, and one that has never been pushed is
+// exactly the case worth warning about.
+func (g *GitWorktree) UnpushedCommitCount() (int, error) {
+	output, err := g.runGitCommand(g.worktreePath, "log", "--oneline", "HEAD", "--not", "--remotes")
+	if err != nil {
+		return 0, fmt.Errorf("failed to count unpushed commits: %w", err)
+	}
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return 0, nil
+	}
+	return len(strings.Split(trimmed, "\n")), nil
+}

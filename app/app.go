@@ -711,9 +711,25 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			return instanceChangedMsg{}
 		}
 
-		// Show confirmation modal
-		message := fmt.Sprintf("[!] Kill session '%s'?", selected.Title)
-		return m, m.confirmAction(message, killAction)
+		// Show confirmation modal, naming any work the kill would destroy. A failed check
+		// only costs the warning: it must not stand between the user and removing a session.
+		dirtyFiles, unpushedCommits := 0, 0
+		if worktree, err := selected.GetGitWorktree(); err != nil {
+			log.WarningLog.Printf("could not inspect worktree of %q for the kill confirmation: %v", selected.Title, err)
+		} else {
+			if n, err := worktree.DirtyFileCount(); err != nil {
+				log.WarningLog.Printf("could not count uncommitted changes in %q: %v", selected.Title, err)
+			} else {
+				dirtyFiles = n
+			}
+			if n, err := worktree.UnpushedCommitCount(); err != nil {
+				log.WarningLog.Printf("could not count unpushed commits in %q: %v", selected.Title, err)
+			} else {
+				unpushedCommits = n
+			}
+		}
+
+		return m, m.confirmAction(killWarning(selected.Title, dirtyFiles, unpushedCommits), killAction)
 	case keys.KeyMoveUp:
 		if m.list.MoveUp() {
 			if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
