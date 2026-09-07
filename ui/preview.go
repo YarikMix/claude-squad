@@ -165,23 +165,12 @@ func (p *PreviewPane) String() string {
 
 	// Strip OSC sequences first: their invisible payload is counted as visible text by the
 	// width helpers below, which would make this pane report itself wider than it is.
-	lines := strings.Split(stripOSCSequences(p.previewState.text), "\n")
-
-	// Truncate if we have more lines than available height
-	if availableHeight > 0 {
-		if len(lines) > availableHeight {
-			lines = lines[:availableHeight]
-			lines = append(lines, "...")
-		} else {
-			// Pad with empty lines to fill available height
-			padding := availableHeight - len(lines)
-			lines = append(lines, make([]string, padding)...)
-		}
-	}
-
-	content := strings.Join(lines, "\n")
-	rendered := previewPaneStyle.Width(p.width).Render(content)
-	return rendered
+	//
+	// Render before clamping: the style wraps overlong lines, so a block clamped first would
+	// grow back past the pane height. See fitHeight. Preview reads from the top, so an
+	// overlong capture keeps its head and marks the cut.
+	rendered := previewPaneStyle.Width(p.width).Render(stripOSCSequences(p.previewState.text))
+	return fitHeight(rendered, availableHeight, false, "...")
 }
 
 // ScrollUp scrolls up in the viewport
