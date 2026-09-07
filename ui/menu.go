@@ -145,16 +145,16 @@ func (m *Menu) addInstanceOptions() {
 	options := []keys.KeyName{keys.KeyNew, keys.KeyKill}
 
 	// Action group
-	actionGroup := []keys.KeyName{keys.KeyEnter, keys.KeySubmit}
+	actionGroup := []keys.KeyName{keys.KeyEnter}
 	if m.instance.Status == session.Paused {
 		actionGroup = append(actionGroup, keys.KeyResume)
 	} else {
 		// Restarting respawns the pane's process, which a paused instance does not have.
-		actionGroup = append(actionGroup, keys.KeyCheckout, keys.KeyRestart)
+		actionGroup = append(actionGroup, keys.KeyRestart)
 	}
 
-	// Navigation group (when in diff tab)
-	if m.activeTab == DiffTab || m.activeTab == TerminalTab {
+	// Navigation group (when in the terminal tab)
+	if m.activeTab == TerminalTab {
 		actionGroup = append(actionGroup, keys.KeyShiftUp)
 	}
 
@@ -185,7 +185,7 @@ func (m *Menu) String() string {
 		end   int
 	}{
 		{0, 2},                                 // Instance management group (n, d)
-		{m.actionGroupStart, m.actionGroupEnd}, // Action group (enter, submit, checkout/resume, restart)
+		{m.actionGroupStart, m.actionGroupEnd}, // Action group (enter, resume/restart)
 		{m.actionGroupEnd, len(m.options)},     // System group (tab, help, q)
 	}
 

@@ -14,7 +14,7 @@
 ### Highlights
 - Complete tasks in the background (including yolo / auto-accept mode!)
 - Manage instances and tasks in one terminal window
-- Review changes before applying them, checkout changes before pushing them
+- See added/removed line counts for each task at a glance
 - Each task gets its own isolated git workspace, so no conflicts
 
 <br />
@@ -57,7 +57,6 @@ curl -fsSL https://raw.githubusercontent.com/YarikMix/claude-squad/main/install.
 ### Prerequisites
 
 - [tmux](https://github.com/tmux/tmux/wiki/Installing)
-- [gh](https://cli.github.com/)
 
 ### Usage
 
@@ -110,17 +109,15 @@ The menu at the bottom of the screen shows available commands:
 ##### Actions
 - `↵/o` - Attach to the selected session to reprompt
 - `ctrl-q` - Detach from session
-- `s` - Commit and push branch to github
-- `c` - Checkout. Commits changes and pauses the session
 - `r` - Resume a paused session
 - `R` - Restart the agent in the selected session, continuing its conversation
 - `ctrl-x` - Restart the agent while attached to it, without detaching (reserved by claude-squad, so an agent CLI that binds `ctrl-x` itself won't see it)
 - `?` - Show help menu
 
 ##### Navigation
-- `tab` - Switch between preview tab and diff tab
+- `tab` - Switch between preview and terminal tabs
 - `q` - Quit the application
-- `shift-↓/↑` - scroll in diff view
+- `shift-↓/↑` - scroll in preview/terminal view
 
 ### Configuration
 

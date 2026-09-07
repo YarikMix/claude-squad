@@ -27,8 +27,6 @@ type helpTypeInstanceStart struct {
 
 type helpTypeInstanceAttach struct{}
 
-type helpTypeInstanceCheckout struct{}
-
 func helpStart(instance *session.Instance) helpText {
 	return helpTypeInstanceStart{instance: instance}
 }
@@ -49,15 +47,11 @@ func (h helpTypeGeneral) toContent() string {
 		keyStyle.Render("ctrl-q")+descStyle.Render("    - Detach from session"),
 		keyStyle.Render("R")+descStyle.Render("         - Restart the agent, continuing its conversation"),
 		keyStyle.Render("ctrl-x")+descStyle.Render("    - Restart the agent while attached to it"),
-		"",
-		headerStyle.Render("Handoff:"),
-		keyStyle.Render("p")+descStyle.Render("         - Commit and push branch to github"),
-		keyStyle.Render("c")+descStyle.Render("         - Checkout: commit changes and pause session"),
 		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session"),
 		"",
 		headerStyle.Render("Other:"),
-		keyStyle.Render("tab")+descStyle.Render("       - Switch between preview, diff, and terminal tabs"),
-		keyStyle.Render("shift-↓/↑")+descStyle.Render(" - Scroll in preview/diff/terminal view"),
+		keyStyle.Render("tab")+descStyle.Render("       - Switch between preview and terminal tabs"),
+		keyStyle.Render("shift-↓/↑")+descStyle.Render(" - Scroll in preview/terminal view"),
 		keyStyle.Render("q")+descStyle.Render("         - Quit the application"),
 	)
 	return content
@@ -75,12 +69,8 @@ func (h helpTypeInstanceStart) toContent() string {
 		"",
 		headerStyle.Render("Managing:"),
 		keyStyle.Render("↵/o")+descStyle.Render("   - Attach to the session to interact with it directly"),
-		keyStyle.Render("tab")+descStyle.Render("   - Switch preview panes to view session diff"),
+		keyStyle.Render("tab")+descStyle.Render("   - Switch between preview and terminal panes"),
 		keyStyle.Render("D")+descStyle.Render("     - Kill (delete) the selected session"),
-		"",
-		headerStyle.Render("Handoff:"),
-		keyStyle.Render("c")+descStyle.Render("     - Checkout this instance's branch"),
-		keyStyle.Render("p")+descStyle.Render("     - Push branch to GitHub to create a PR"),
 	)
 	return content
 }
@@ -95,20 +85,6 @@ func (h helpTypeInstanceAttach) toContent() string {
 	return content
 }
 
-func (h helpTypeInstanceCheckout) toContent() string {
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("Checkout Instance"),
-		"",
-		"Changes will be committed locally. The branch name has been copied to your clipboard for you to checkout.",
-		"",
-		"Feel free to make changes to the branch and commit them. When resuming, the session will continue from where you left off.",
-		"",
-		headerStyle.Render("Commands:"),
-		keyStyle.Render("c")+descStyle.Render(" - Checkout: commit changes locally and pause session"),
-		keyStyle.Render("r")+descStyle.Render(" - Resume a paused session"),
-	)
-	return content
-}
 func (h helpTypeGeneral) mask() uint32 {
 	return 1
 }
@@ -119,9 +95,11 @@ func (h helpTypeInstanceStart) mask() uint32 {
 func (h helpTypeInstanceAttach) mask() uint32 {
 	return 1 << 2
 }
-func (h helpTypeInstanceCheckout) mask() uint32 {
-	return 1 << 3
-}
+
+// 1 << 3 was used by the removed checkout help screen (helpTypeInstanceCheckout).
+// Do not reuse it: existing users' state.json may still have that bit set in
+// help_screens_seen, so a new help type claiming it would read as already-seen
+// and never display.
 
 var (
 	titleStyle  = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(lipgloss.Color("#7D56F4"))

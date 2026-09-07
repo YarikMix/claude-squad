@@ -89,7 +89,7 @@ type home struct {
 	list *ui.List
 	// menu displays the bottom menu
 	menu *ui.Menu
-	// tabbedWindow displays the tabbed window with preview and diff panes
+	// tabbedWindow displays the tabbed window with preview and terminal panes
 	tabbedWindow *ui.TabbedWindow
 	// errBox displays error messages
 	errBox *ui.ErrBox
@@ -121,7 +121,7 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 		ctx:          ctx,
 		spinner:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		menu:         ui.NewMenu(),
-		tabbedWindow: ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane()),
+		tabbedWindow: ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewTerminalPane()),
 		errBox:       ui.NewErrBox(),
 		storage:      storage,
 		appConfig:    appConfig,
@@ -189,7 +189,7 @@ func (m *home) Init() tea.Cmd {
 			time.Sleep(100 * time.Millisecond)
 			return previewTickMsg{}
 		},
-		tickUpdateMetadataCmd(m.snapshotActiveInstances(), m.list.GetSelectedInstance()),
+		tickUpdateMetadataCmd(m.snapshotActiveInstances()),
 	)
 }
 
@@ -257,9 +257,9 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				r.instance.SetDiffStats(r.diffStats)
 			}
 		}
-		return m, tickUpdateMetadataCmd(m.snapshotActiveInstances(), m.list.GetSelectedInstance())
+		return m, tickUpdateMetadataCmd(m.snapshotActiveInstances())
 	case tea.MouseMsg:
-		// Handle mouse wheel events for scrolling the diff/preview pane
+		// Handle mouse wheel events for scrolling the preview/terminal pane
 		if msg.Action == tea.MouseActionPress {
 			if msg.Button == tea.MouseButtonWheelDown || msg.Button == tea.MouseButtonWheelUp {
 				selected := m.list.GetSelectedInstance()
@@ -576,7 +576,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	}
 
 	// Exit scrolling mode when ESC is pressed and preview pane is in scrolling mode
-	// Check if Escape key was pressed and we're not in the diff tab (meaning we're in preview tab)
+	// Check if Escape key was pressed while in the preview or terminal tab
 	// Always check for escape key first to ensure it doesn't get intercepted elsewhere
 	if msg.Type == tea.KeyEsc {
 		// If in preview tab and in scroll mode, exit scroll mode
@@ -714,44 +714,6 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		// Show confirmation modal
 		message := fmt.Sprintf("[!] Kill session '%s'?", selected.Title)
 		return m, m.confirmAction(message, killAction)
-	case keys.KeySubmit:
-		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
-			return m, nil
-		}
-
-		// Create the push action as a tea.Cmd
-		pushAction := func() tea.Msg {
-			// Default commit message with timestamp
-			commitMsg := fmt.Sprintf("[claudesquad] update from '%s' on %s", selected.Title, time.Now().Format(time.RFC822))
-			worktree, err := selected.GetGitWorktree()
-			if err != nil {
-				return err
-			}
-			if err = worktree.PushChanges(commitMsg, true); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		// Show confirmation modal
-		message := fmt.Sprintf("[!] Push changes from session '%s'?", selected.Title)
-		return m, m.confirmAction(message, pushAction)
-	case keys.KeyCheckout:
-		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
-			return m, nil
-		}
-
-		// Show help screen before pausing
-		m.showHelpScreen(helpTypeInstanceCheckout{}, func() {
-			if err := selected.Pause(); err != nil {
-				m.handleError(err)
-			}
-			m.tabbedWindow.CleanupTerminalForInstance(selected.Title)
-			m.instanceChanged()
-		})
-		return m, nil
 	case keys.KeyMoveUp:
 		if m.list.MoveUp() {
 			if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
@@ -832,13 +794,12 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	}
 }
 
-// instanceChanged updates the preview pane, menu, and diff pane based on the selected instance. It returns an error
+// instanceChanged updates the preview pane, menu, and terminal pane based on the selected instance. It returns an error
 // Cmd if there was any error.
 func (m *home) instanceChanged() tea.Cmd {
 	// selected may be nil
 	selected := m.list.GetSelectedInstance()
 
-	m.tabbedWindow.UpdateDiff(selected)
 	m.tabbedWindow.SetInstance(selected)
 	// Update menu with current instance
 	m.menu.SetInstance(selected)
@@ -966,10 +927,9 @@ func (m *home) snapshotActiveInstances() []*session.Instance {
 // The active instances slice should be snapshotted on the main thread via
 // snapshotActiveInstances() before being passed here.
 //
-// Only the selected instance gets a full diff (with Content); the rest get a
-// lightweight numstat-only summary. This keeps per-instance memory bounded
-// since the diff pane only ever renders the selected one.
-func tickUpdateMetadataCmd(active []*session.Instance, selected *session.Instance) tea.Cmd {
+// Every instance gets a numstat-only summary (no diff Content). This keeps per-instance
+// memory bounded and avoids computing diff text that nothing displays.
+func tickUpdateMetadataCmd(active []*session.Instance) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(500 * time.Millisecond)
 
@@ -986,11 +946,7 @@ func tickUpdateMetadataCmd(active []*session.Instance, selected *session.Instanc
 				r := &results[i]
 				r.instance = instance
 				r.updated, r.hasPrompt = instance.HasUpdated()
-				if instance == selected {
-					r.diffStats = instance.ComputeDiff()
-				} else {
-					r.diffStats = instance.ComputeDiffNumstat()
-				}
+				r.diffStats = instance.ComputeDiffNumstat()
 			}(idx, inst)
 		}
 		wg.Wait()
