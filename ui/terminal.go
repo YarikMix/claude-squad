@@ -137,6 +137,13 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 	// Check if we already have a cached session for this instance
 	if s, ok := t.sessions[instance.Title]; ok {
 		if s.tmuxSession != nil && s.tmuxSession.DoesSessionExist() {
+			// Bring it to the pane's current size before showing it. A cached session
+			// keeps whatever size it had when it was last displayed, and SetSize only
+			// resizes the session on screen — so a window resized while another instance
+			// was selected leaves this one shaped for the old geometry. Its captured
+			// content is then the wrong shape for the pane, which renders as stale or
+			// blank output that only a restart used to clear.
+			t.applySizeLocked(s.tmuxSession)
 			return nil
 		}
 		// Session died, remove stale entry and recreate below
@@ -172,14 +179,21 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 		worktreePath: worktreePath,
 	}
 
-	// Set the size
-	if t.width > 0 && t.height > 0 {
-		if err := ts.SetDetachedSize(t.width, t.height); err != nil {
-			log.InfoLog.Printf("terminal pane: failed to set size: %v", err)
-		}
-	}
+	t.applySizeLocked(ts)
 
 	return nil
+}
+
+// applySizeLocked resizes a terminal session to the pane's current dimensions. Callers must
+// hold t.mu. A failure is logged rather than returned: a mis-sized pane is a rendering
+// problem, not a reason to refuse the session.
+func (t *TerminalPane) applySizeLocked(ts *tmux.TmuxSession) {
+	if ts == nil || t.width <= 0 || t.height <= 0 {
+		return
+	}
+	if err := ts.SetDetachedSize(t.width, t.height); err != nil {
+		log.InfoLog.Printf("terminal pane: failed to set size: %v", err)
+	}
 }
 
 // Attach attaches to the terminal tmux session (full-screen).
