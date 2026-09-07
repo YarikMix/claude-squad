@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muesli/reflow/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,4 +117,74 @@ func TestTabbedWindowNeverRendersTallerThanTheScreen(t *testing.T) {
 
 	require.LessOrEqual(t, len(strings.Split(w.String(), "\n")), height,
 		"tabbed window is taller than the screen, which scrolls the tab bar out of view")
+}
+
+// rightPromptLine reproduces the shape tmux captures from a shell prompt that has a right-hand
+// segment, as powerlevel10k does: the prompt text, a long run of padding that holds the right
+// segment against the far edge, and a colour reset followed by trailing whitespace.
+//
+// lipgloss wraps through ansi.Wrap, which does not count trailing whitespace against the limit.
+// It normally trims a trailing run, but the escape sequence splits this run in two and defeats
+// that trimming, so the wrapped line keeps the padding and comes back wider than the pane.
+func rightPromptLine(width int) string {
+	return "~/worktrees/session" + strings.Repeat(" ", width*2) + "\x1b[m "
+}
+
+// The defect this guards: an over-wide line makes lipgloss pad the whole block out to that
+// width, so every line in the pane is too wide. The pane then reports itself wider than its box
+// and JoinVertical stretches the tabbed window past the tab bar, squeezing the instance list.
+func TestTerminalPaneNeverRendersWiderThanThePaneOnPromptPadding(t *testing.T) {
+	const width, height = 60, 12
+
+	term := NewTerminalPane()
+	term.SetSize(width, height)
+	term.content = rightPromptLine(width) + "\n"
+
+	for i, line := range strings.Split(term.String(), "\n") {
+		require.LessOrEqual(t, ansi.PrintableRuneWidth(line), width,
+			"rendered terminal line %d is wider than the pane", i)
+	}
+}
+
+// The preview pane renders captured content through the same path and needs the same bound.
+func TestPreviewPaneNeverRendersWiderThanThePaneOnPromptPadding(t *testing.T) {
+	const width, height = 60, 12
+
+	p := NewPreviewPane()
+	p.SetSize(width, height)
+	p.previewState = previewState{text: rightPromptLine(width) + "\n"}
+
+	for i, line := range strings.Split(p.String(), "\n") {
+		require.LessOrEqual(t, ansi.PrintableRuneWidth(line), width,
+			"rendered preview line %d is wider than the pane", i)
+	}
+}
+
+// Clamping the width must drop only the invisible padding: the prompt text fits the pane, so
+// none of it may be cut.
+func TestTerminalPaneKeepsVisibleTextWhenClampingWidth(t *testing.T) {
+	const width, height = 60, 12
+
+	term := NewTerminalPane()
+	term.SetSize(width, height)
+	term.content = rightPromptLine(width) + "\n"
+
+	require.Contains(t, term.String(), "~/worktrees/session", "visible prompt text was cut")
+}
+
+// The pane bound matters because the window has none: JoinVertical widens the whole block to its
+// widest child, so an over-wide pane pushes the window past the tab bar and off the screen.
+func TestTabbedWindowNeverRendersWiderThanTheScreen(t *testing.T) {
+	const width, height = 80, 30
+
+	term := NewTerminalPane()
+	w := NewTabbedWindow(NewPreviewPane(), term)
+	w.SetSize(width, height)
+	w.Toggle() // Preview -> Terminal
+	term.content = rightPromptLine(width) + "\n"
+
+	for i, line := range strings.Split(w.String(), "\n") {
+		require.LessOrEqual(t, ansi.PrintableRuneWidth(line), width,
+			"tabbed window line %d is wider than the screen", i)
+	}
 }

@@ -167,10 +167,10 @@ func (p *PreviewPane) String() string {
 	// width helpers below, which would make this pane report itself wider than it is.
 	//
 	// Render before clamping: the style wraps overlong lines, so a block clamped first would
-	// grow back past the pane height. See fitHeight. Preview reads from the top, so an
+	// grow back past the pane height. See fitBox. Preview reads from the top, so an
 	// overlong capture keeps its head and marks the cut.
 	rendered := previewPaneStyle.Width(p.width).Render(stripOSCSequences(p.previewState.text))
-	return fitHeight(rendered, availableHeight, false, "...")
+	return fitBox(rendered, p.width, availableHeight, false, "...")
 }
 
 // ScrollUp scrolls up in the viewport
