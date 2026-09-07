@@ -34,4 +34,17 @@ GoReleaser собирает список коммитов автоматичес
 gh release edit vX.Y.Z --repo YarikMix/claude-squad --notes-file notes.md
 ```
 
-Правка черновика через API сбрасывает привязку к тегу — после неё проверьте `tag_name` и при необходимости верните его тем же вызовом.
+`gh release edit` привязку к тегу сохраняет. URL вида `untagged-8500982a…`, который он печатает в ответ, — это просто адрес неопубликованного черновика, а не признак поломки.
+
+Сбрасывает привязку сырой PATCH через `gh api`, если в нём не передан `tag_name`:
+
+```bash
+# так tag_name станет untagged-…
+gh api repos/YarikMix/claude-squad/releases/<id> -X PATCH -f body=@notes.md
+```
+
+Поэтому правьте черновик через `gh release edit`. Если всё же понадобился `gh api`, передавайте `tag_name` в том же вызове и проверяйте результат — по API, а не по напечатанному URL:
+
+```bash
+gh api repos/YarikMix/claude-squad/releases/<id> --jq '.tag_name, .draft'
+```
