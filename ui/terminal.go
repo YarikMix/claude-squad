@@ -299,19 +299,12 @@ func (t *TerminalPane) String() string {
 
 	// Normal mode: show captured content. Strip OSC sequences first — see the preview pane
 	// for why an unstripped hyperlink makes this pane measure wider than it renders.
-	lines := strings.Split(stripOSCSequences(content), "\n")
-
-	if height > 0 {
-		if len(lines) > height {
-			lines = lines[len(lines)-height:]
-		} else {
-			padding := height - len(lines)
-			lines = append(lines, make([]string, padding)...)
-		}
-	}
-
-	contentStr := strings.Join(lines, "\n")
-	return terminalPaneStyle.Width(width).Render(contentStr)
+	//
+	// Render before clamping: the style wraps overlong lines, so a block clamped first would
+	// grow back past the pane height. See fitHeight. A live session shows its newest output,
+	// so an overlong capture keeps its tail.
+	rendered := terminalPaneStyle.Width(width).Render(stripOSCSequences(content))
+	return fitHeight(rendered, height, true, "")
 }
 
 // enterScrollMode captures the full terminal history and enters scroll mode.
