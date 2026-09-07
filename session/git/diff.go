@@ -7,7 +7,9 @@ import (
 
 // DiffStats holds statistics about the changes in a diff
 type DiffStats struct {
-	// Content is the full diff content
+	// Content is the full diff content. Nothing computes this any more; it is retained
+	// only for state.json compatibility (FromInstanceData may populate it from an older
+	// saved state) and is always empty going forward.
 	Content string
 	// Added is the number of added lines
 	Added int
@@ -18,13 +20,16 @@ type DiffStats struct {
 	Error error
 }
 
+// IsEmpty reports whether the diff has no changes. The "&& d.Content == """ clause is
+// always true going forward since nothing sets Content any more (see the field comment
+// above); it stays for correctness against DiffStats restored from an older state.json.
 func (d *DiffStats) IsEmpty() bool {
 	return d.Added == 0 && d.Removed == 0 && d.Content == ""
 }
 
 // DiffNumstat returns the added/removed line counts between the worktree and the
-// base branch without loading the full diff content into memory. Use this when
-// only the summary counts are needed (e.g. for unselected instances in the list).
+// base branch without loading the full diff content into memory. This is the only
+// way diff statistics are computed; it backs the +/- counters in the session list.
 func (g *GitWorktree) DiffNumstat() *DiffStats {
 	stats := &DiffStats{}
 

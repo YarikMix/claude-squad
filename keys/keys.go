@@ -13,8 +13,6 @@ const (
 	KeyNew
 	KeyKill
 	KeyQuit
-	KeyReview
-	KeyPush
 
 	KeyTab        // Tab is a special keybinding for switching between panes.
 	KeySubmitName // SubmitName is a special keybinding for submitting the name of a new instance.
@@ -23,7 +21,7 @@ const (
 	KeyPrompt // New key for entering a prompt
 	KeyHelp   // Key for showing help screen
 
-	// Diff keybindings
+	// Scroll keybindings
 	KeyShiftUp
 	KeyShiftDown
 

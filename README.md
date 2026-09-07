@@ -14,7 +14,7 @@
 ### Highlights
 - Complete tasks in the background (including yolo / auto-accept mode!)
 - Manage instances and tasks in one terminal window
-- Review changes before applying them, checkout changes before pushing them
+- See added/removed line counts for each task at a glance
 - Each task gets its own isolated git workspace, so no conflicts
 
 <br />

@@ -66,15 +66,6 @@ func (g *GitWorktree) runGitCommand(path string, args ...string) (string, error)
 	return string(output), nil
 }
 
-// IsDirty checks if the worktree has uncommitted changes
-func (g *GitWorktree) IsDirty() (bool, error) {
-	output, err := g.runGitCommand(g.worktreePath, "status", "--porcelain")
-	if err != nil {
-		return false, fmt.Errorf("failed to check worktree status: %w", err)
-	}
-	return len(output) > 0, nil
-}
-
 // IsValidWorktree reports whether the worktree path exists and contains a
 // .git entry, i.e. git can still recognize it as a working tree.
 // Returns (false, nil) if the worktree is orphaned (path or .git missing).

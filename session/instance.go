@@ -22,7 +22,8 @@ const (
 	Ready
 	// Loading is if the instance is loading (if we are starting it up or something).
 	Loading
-	// Paused is if the instance is paused (worktree removed but branch preserved).
+	// Paused marks an instance whose tmux session is gone while its worktree and branch
+	// remain on disk.
 	Paused
 )
 
@@ -453,9 +454,10 @@ func (i *Instance) Resume() error {
 	}
 
 	// Setup git worktree. Setup removes and re-adds the worktree from the branch, which
-	// throws away anything uncommitted in it. After a normal Pause the directory is gone
-	// and that is exactly what we want; but an instance paused because its tmux session
-	// died still has its worktree — and the work in it — sitting on disk, so leave it be.
+	// throws away anything uncommitted in it. The only way to reach Paused is a tmux
+	// session that died out from under us, so the worktree — and the work in it — is
+	// normally still sitting on disk; only rebuild it here if it is genuinely missing
+	// or otherwise invalid.
 	if valid, err := i.gitWorktree.IsValidWorktree(); err != nil || !valid {
 		if err != nil {
 			log.WarningLog.Printf("could not validate worktree at %s, recreating it: %v",
@@ -588,8 +590,7 @@ func (i *Instance) UpdateDiffStats() error {
 
 // ComputeDiffNumstat runs a lightweight git diff --numstat and returns only the
 // added/removed line counts (Content is left empty). Safe to call from a
-// background goroutine. Use this for instances whose full diff content is not
-// currently needed so we avoid keeping large diffs in memory.
+// background goroutine.
 func (i *Instance) ComputeDiffNumstat() *git.DiffStats {
 	if !i.started || i.Status == Paused {
 		return nil

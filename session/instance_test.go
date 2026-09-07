@@ -527,4 +527,6 @@ func TestUpdateDiffStatsDoesNotComputeDiffText(t *testing.T) {
 	require.NotNil(t, instance.GetDiffStats(), "statistics should still be produced")
 	require.Empty(t, instance.GetDiffStats().Content,
 		"numstat reports counts only; nothing renders diff text any more")
+	require.Equal(t, 1, instance.GetDiffStats().Added,
+		"the one-line change should be counted, not just left uncounted")
 }

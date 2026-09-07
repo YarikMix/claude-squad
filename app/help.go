@@ -47,8 +47,6 @@ func (h helpTypeGeneral) toContent() string {
 		keyStyle.Render("ctrl-q")+descStyle.Render("    - Detach from session"),
 		keyStyle.Render("R")+descStyle.Render("         - Restart the agent, continuing its conversation"),
 		keyStyle.Render("ctrl-x")+descStyle.Render("    - Restart the agent while attached to it"),
-		"",
-		headerStyle.Render("Handoff:"),
 		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session"),
 		"",
 		headerStyle.Render("Other:"),
@@ -97,6 +95,11 @@ func (h helpTypeInstanceStart) mask() uint32 {
 func (h helpTypeInstanceAttach) mask() uint32 {
 	return 1 << 2
 }
+
+// 1 << 3 was used by the removed checkout help screen (helpTypeInstanceCheckout).
+// Do not reuse it: existing users' state.json may still have that bit set in
+// help_screens_seen, so a new help type claiming it would read as already-seen
+// and never display.
 
 var (
 	titleStyle  = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(lipgloss.Color("#7D56F4"))
