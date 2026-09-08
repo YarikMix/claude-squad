@@ -101,3 +101,36 @@ func TestResumeAfterTmuxServerDies(t *testing.T) {
 	require.True(t, h.BranchExists("e2e/alpha"))
 	require.Equal(t, []string{tmuxPrefix + "alpha"}, h.inner.sessions())
 }
+
+func TestRestartKeepsTheSessionAndAppendsRestartArgs(t *testing.T) {
+	h := newHarness(t)
+	createSession(h, "alpha")
+	agent := h.Instance("alpha")
+
+	agent.Type("echo marker")
+	agent.Keys("Enter")
+	h.WaitFor("fake-agent: marker")
+
+	h.Keys("R")
+	h.WaitFor("fake-agent ready args=[--continue]")
+	h.WaitNot("fake-agent: marker")
+	require.Equal(t, []string{tmuxPrefix + "alpha"}, h.inner.sessions(), "restart respawns the pane, not the session")
+	require.Equal(t, "alpha", h.WindowName("alpha"))
+
+	// Second act: the same restart from inside the attached session.
+	agent.Type("echo second")
+	agent.Keys("Enter")
+	h.WaitFor("fake-agent: second")
+	h.Keys("o")
+	h.WaitNot("Instances")
+	h.WaitFor("fake-agent: second")
+
+	h.Keys("C-x")
+	h.WaitNot("fake-agent: second")
+	screen := h.WaitFor("fake-agent ready args=[--continue]")
+	require.NotContains(t, screen, "Instances", "Ctrl+X keeps the user attached")
+	require.Equal(t, "alpha", h.WindowName("alpha"))
+
+	h.Keys("C-q")
+	h.WaitFor("Instances")
+}

@@ -337,10 +337,12 @@ func (h *harness) dumpLog() {
 
 // Instance addresses the tmux session cs created for the instance with this title, on the
 // inner server. cs strips whitespace from the title and prefixes it; `=` asks tmux for an
-// exact match rather than a prefix match.
+// exact match rather than a prefix match. The trailing `:` is required on tmux 3.7c: a bare
+// `=name` resolves fine for a session-level command like display-message, but a pane-level
+// command (send-keys, capture-pane) reports "can't find pane" without it.
 func (h *harness) Instance(title string) *pane {
 	name := tmuxPrefix + strings.Join(strings.Fields(title), "")
-	return &pane{t: h.t, env: h.env, target: "=" + name}
+	return &pane{t: h.t, env: h.env, target: "=" + name + ":"}
 }
 
 // Worktrees lists the worktree directories cs has on disk. It walks rather than globbing one
@@ -369,6 +371,14 @@ func (h *harness) Worktrees() []string {
 	})
 	require.NoError(h.t, err)
 	return found
+}
+
+// WindowName is what tmux shows for the instance's window; cs names it after the instance
+// so the status line answers "which session is this" rather than "which process".
+func (h *harness) WindowName(title string) string {
+	h.t.Helper()
+	out := h.inner.tmux("display-message", "-p", "-t", h.Instance(title).target, "#{window_name}")
+	return strings.TrimSpace(out)
 }
 
 func (h *harness) BranchExists(name string) bool {
