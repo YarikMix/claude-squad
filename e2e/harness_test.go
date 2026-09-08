@@ -397,6 +397,33 @@ func (h *harness) PushBranch(dir string) {
 	h.git(dir, "push", "-q", "origin", "HEAD")
 }
 
+// KillInnerServer takes down every instance session at once, the way a reboot or a stray
+// `tmux kill-server` does. The outer server, and cs in it, are untouched.
+func (h *harness) KillInnerServer() {
+	h.t.Helper()
+	h.t.Log("kill inner tmux server")
+	h.inner.tmux("kill-server")
+}
+
+// Quit leaves cs through q and waits for its process to end. remain-on-exit keeps the
+// outer pane so Relaunch can reuse it.
+func (h *harness) Quit() {
+	h.t.Helper()
+	h.Keys("q")
+	h.waitUntil("cs to exit", func() bool {
+		out, _ := h.run("display-message", "-p", "-t", outerSession, "#{pane_dead}")
+		return strings.TrimSpace(out) == "1"
+	})
+}
+
+// Relaunch starts cs again in the same pane, as a user would after a reboot.
+func (h *harness) Relaunch() {
+	h.t.Helper()
+	h.t.Log("relaunch cs")
+	h.tmux("respawn-pane", "-t", outerSession, h.csCommand())
+	h.WaitFor("Instances")
+}
+
 func TestHarnessStartsWithAnEmptyList(t *testing.T) {
 	h := newHarness(t)
 	screen := h.WaitFor("No agents running yet")

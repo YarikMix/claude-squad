@@ -80,3 +80,28 @@ func TestKillRemovesACleanSessionWithoutWarning(t *testing.T) {
 	require.False(t, h.BranchExists("e2e/alpha"))
 	require.Empty(t, h.inner.sessions())
 }
+
+func TestResumeAfterTmuxServerDies(t *testing.T) {
+	h := newHarness(t)
+	createSession(h, "alpha")
+	wtBefore := h.SoleWorktree()
+
+	h.Quit()
+	h.KillInnerServer()
+	require.Empty(t, h.inner.sessions())
+	h.Relaunch()
+
+	// The full sentence never fits: the preview's fallback block is centered as a whole
+	// against its widest line (the "checked out at '<branch>'" hint below), which is wider
+	// than the pane at this screen size, so fitBox truncates the right side of every line
+	// in the block, "resume." included. The stable prefix is enough to prove the state.
+	screen := h.WaitFor("Session is paused.")
+	require.Contains(t, screen, "alpha")
+	require.Contains(t, screen, "resume", "the menu must offer r")
+
+	h.Keys("r")
+	h.WaitFor("fake-agent ready args=[--continue]")
+	require.Equal(t, wtBefore, h.SoleWorktree(), "resume reuses the worktree on disk")
+	require.True(t, h.BranchExists("e2e/alpha"))
+	require.Equal(t, []string{tmuxPrefix + "alpha"}, h.inner.sessions())
+}
