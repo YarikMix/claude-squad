@@ -91,11 +91,7 @@ func TestResumeAfterTmuxServerDies(t *testing.T) {
 	require.Empty(t, h.inner.sessions())
 	h.Relaunch()
 
-	// The full sentence never fits: the preview's fallback block is centered as a whole
-	// against its widest line (the "checked out at '<branch>'" hint below), which is wider
-	// than the pane at this screen size, so fitBox truncates the right side of every line
-	// in the block, "resume." included. The stable prefix is enough to prove the state.
-	screen := h.WaitFor("Session is paused.")
+	screen := h.WaitFor("Session is paused. Press 'r' to resume.")
 	require.Contains(t, screen, "alpha")
 	require.Contains(t, screen, "resume", "the menu must offer r")
 
