@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -207,7 +208,8 @@ type harness struct {
 	repo   string // the repository cs is launched in
 	origin string // bare remote of repo
 	env    []string
-	inner  *pane // the default-socket server, where cs creates instance sessions
+	inner  *pane  // the default-socket server, where cs creates instance sessions
+	shell  string // path to fake-shell, cs's stand-in for the user's login shell
 }
 
 func newHarness(t *testing.T) *harness {
@@ -228,6 +230,7 @@ func newHarness(t *testing.T) *harness {
 		require.NoError(t, os.MkdirAll(d, 0o755))
 	}
 	h.env = sandboxEnv(root, h.home, bin)
+	h.shell = filepath.Join(bin, "fake-shell")
 	for _, name := range []string{"fake-agent", "fake-shell"} {
 		src, err := os.ReadFile(filepath.Join("testdata", name))
 		require.NoError(t, err)
@@ -307,8 +310,16 @@ func (h *harness) initRepo() {
 
 // csCommand is what the outer pane runs. TMUX and TMUX_PANE are unset so cs's tmux calls
 // go to the default socket rather than the outer server, and so its nested attach is allowed.
+//
+// SHELL is set explicitly on this command line rather than left to sandboxEnv: the outer
+// pane belongs to a tmux server too, and tmux stamps every pane's SHELL environment variable
+// to match its own default-shell option (needed so it can run this very command line through
+// `default-shell -c`, see tmuxConf) — overriding whatever SHELL was in the environment used
+// to start the pane. That stamp lands before this command line is parsed, so a literal
+// `SHELL=...` prefix on cs's own invocation is applied afterwards, by the shell, and is not
+// clobbered by it — unlike sandboxEnv's SHELL, which cs would otherwise never see.
 func (h *harness) csCommand() string {
-	return fmt.Sprintf("env -u TMUX -u TMUX_PANE %s -p fake-agent", csBinary)
+	return fmt.Sprintf("SHELL=%s env -u TMUX -u TMUX_PANE %s -p fake-agent", h.shell, csBinary)
 }
 
 func (h *harness) launch() {
@@ -433,6 +444,24 @@ func (h *harness) Relaunch() {
 	h.t.Log("relaunch cs")
 	h.tmux("respawn-pane", "-t", outerSession, h.csCommand())
 	h.WaitFor("Instances")
+}
+
+// requireLayoutIntact checks what the user loses when a pane overflows: the list header,
+// the tab bar and the first list entry scroll off the top (PR #12), and the tab window
+// pushes the list aside when a line is wider than the pane (PR #13). capture-pane returns
+// exactly the window's rows, so an overflowing render shows up as content scrolled off the
+// top, and the width check catches an overwide row directly.
+func requireLayoutIntact(t *testing.T, screen string, width, height int) {
+	t.Helper()
+	require.Contains(t, screen, "Instances", "list header scrolled off")
+	require.Contains(t, screen, "Preview")
+	require.Contains(t, screen, "Terminal")
+	require.Contains(t, screen, "alpha", "first list entry scrolled off")
+	for i, line := range strings.Split(screen, "\n") {
+		require.LessOrEqual(t, runewidth.StringWidth(line), width, "row %d wider than the window: %q", i, line)
+	}
+	rows := strings.Split(strings.TrimRight(screen, "\n"), "\n")
+	require.LessOrEqual(t, len(rows), height, "more rows than the window has")
 }
 
 func TestHarnessStartsWithAnEmptyList(t *testing.T) {

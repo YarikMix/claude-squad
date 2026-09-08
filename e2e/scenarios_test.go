@@ -161,3 +161,27 @@ func TestAgentExitInsideThePaneReturnsToTheList(t *testing.T) {
 	h.WaitFor("fake-agent ready args=[--continue]")
 	require.Equal(t, wt, h.SoleWorktree())
 }
+
+func TestTerminalTabSurvivesResize(t *testing.T) {
+	h := newHarness(t)
+	createSession(h, "alpha")
+
+	h.Keys("Tab")
+	screen := h.WaitFor("fake-shell$")
+	requireLayoutIntact(t, screen, screenWidth, screenHeight)
+
+	h.Resize(120, 40)
+	screen = h.WaitFor("fake-shell$")
+	requireLayoutIntact(t, screen, 120, 40)
+
+	h.Resize(screenWidth, screenHeight)
+	screen = h.WaitFor("fake-shell$")
+	requireLayoutIntact(t, screen, screenWidth, screenHeight)
+
+	// Switching away and back must not leave the pane blank (PR #10).
+	h.Keys("Tab")
+	h.WaitFor("fake-agent ready")
+	h.Keys("Tab")
+	screen = h.WaitFor("fake-shell$")
+	requireLayoutIntact(t, screen, screenWidth, screenHeight)
+}
