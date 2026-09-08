@@ -271,30 +271,12 @@ func (t *TerminalPane) String() string {
 	content := t.content
 
 	if fallback {
-		// 3 = tab bar height (border + padding + text), 4 = window style frame (top/bottom border + padding)
-		availableHeight := height - 3 - 4
-		fallbackLines := len(strings.Split(fallbackText, "\n"))
-		totalPadding := availableHeight - fallbackLines
-		topPadding := 0
-		bottomPadding := 0
-		if totalPadding > 0 {
-			topPadding = totalPadding / 2
-			bottomPadding = totalPadding - topPadding
-		}
-
-		var lines []string
-		if topPadding > 0 {
-			lines = append(lines, strings.Repeat("\n", topPadding))
-		}
-		lines = append(lines, fallbackText)
-		if bottomPadding > 0 {
-			lines = append(lines, strings.Repeat("\n", bottomPadding))
-		}
-
-		return terminalPaneStyle.
-			Width(width).
-			Align(lipgloss.Center).
-			Render(strings.Join(lines, ""))
+		// Place, then clamp — never wrap. See the preview pane's fallback branch: the banner is
+		// one long run per line with no whitespace to break on, so a Width-triggered wrap
+		// fragments it instead of shrinking it once the pane is narrower than the banner. Place
+		// only positions and pads, it never wraps, and fitBox truncates whatever still overflows.
+		placed := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, fallbackText)
+		return terminalPaneStyle.Render(fitBox(placed, width, height, false, ""))
 	}
 
 	// Normal mode: show captured content. Strip OSC sequences first — see the preview pane

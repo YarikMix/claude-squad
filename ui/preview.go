@@ -122,36 +122,13 @@ func (p *PreviewPane) String() string {
 	}
 
 	if p.previewState.fallback {
-		// Calculate available height for fallback text
-		availableHeight := p.height - 3 - 4 // 2 for borders, 1 for margin, 1 for padding
-
-		// Count the number of lines in the fallback text
-		fallbackLines := len(strings.Split(p.previewState.text, "\n"))
-
-		// Calculate padding needed above and below to center the content
-		totalPadding := availableHeight - fallbackLines
-		topPadding := 0
-		bottomPadding := 0
-		if totalPadding > 0 {
-			topPadding = totalPadding / 2
-			bottomPadding = totalPadding - topPadding // accounts for odd numbers
-		}
-
-		// Build the centered content
-		var lines []string
-		if topPadding > 0 {
-			lines = append(lines, strings.Repeat("\n", topPadding))
-		}
-		lines = append(lines, p.previewState.text)
-		if bottomPadding > 0 {
-			lines = append(lines, strings.Repeat("\n", bottomPadding))
-		}
-
-		// Center both vertically and horizontally
-		return previewPaneStyle.
-			Width(p.width).
-			Align(lipgloss.Center).
-			Render(strings.Join(lines, ""))
+		// Place, then clamp — never wrap. The fallback text is an ASCII banner: each line is one
+		// long run with no whitespace to break on, so a Width-triggered wrap (as this used to
+		// apply) wouldn't shrink it but fragment it into unreadable pieces once the pane is
+		// narrower than the banner. Place only positions and pads, it never wraps, and fitBox
+		// truncates whatever still overflows the box. See fitBox's own doc comment.
+		placed := lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, p.previewState.text)
+		return previewPaneStyle.Render(fitBox(placed, p.width, p.height, false, ""))
 	}
 
 	// If in copy mode, use the viewport to display scrollable content
