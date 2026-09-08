@@ -1,0 +1,15 @@
+#!/bin/sh
+# fake-shell stands in for the user's shell on the Terminal tab.
+#
+# Its prompt reproduces the shape that broke pane width in PR #13: a line wider than the
+# pane whose trailing spaces are split by an SGR reset, which is what tmux captures from a
+# powerlevel10k right prompt. Everything else is a minimal REPL so the pane stays alive.
+prompt() {
+	awk 'BEGIN { while (i++ < 100) printf "="; printf "        \033[0m        \n" }'
+	printf 'fake-shell$ '
+}
+prompt
+while IFS= read -r line; do
+	printf 'fake-shell: %s\n' "$line"
+	prompt
+done
