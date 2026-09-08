@@ -184,11 +184,17 @@ func (p *pane) WaitNot(want string) {
 // WaitForWidth blocks until the render reflects a resize to width w and returns that screen.
 // tmux reflows the OLD grid onto the new pane size the instant Resize returns, well before cs
 // has handled SIGWINCH and re-rendered, so a prompt string reappearing on screen is not proof
-// the new size was drawn. The menu row is sized to the full window width (app/app.go:180), so
-// once cs has redrawn, the widest captured row reaches w; the -1 tolerates a trailing column
-// tmux sometimes trims from capture-pane.
+// the new size was drawn. The menu row and the list/tabs header are both centered with
+// lipgloss.Place/JoinVertical, which pad out to the full width with real space characters —
+// capture-pane -p trims those trailing spaces from every row, so even a correct render never
+// measures at exactly w (measured short by 3 columns at w=120 in practice). tolerance is a
+// generous margin around that, not the exact gap, since it depends on how the padding happens
+// to split between the two sides of center alignment. It stays far below the width the OLD,
+// not-yet-redrawn grid can reach after a grow (verified: 80 columns of real content, resizing
+// to 120), so it cannot be satisfied by stale content on a widening resize.
 func (p *pane) WaitForWidth(w int) string {
 	p.t.Helper()
+	const tolerance = 8
 	var screen string
 	p.waitUntil(fmt.Sprintf("render to reach width %d", w), func() bool {
 		screen, _ = p.run("capture-pane", "-p", "-t", p.target)
@@ -198,7 +204,7 @@ func (p *pane) WaitForWidth(w int) string {
 				widest = lw
 			}
 		}
-		return widest >= w-1
+		return widest >= w-tolerance
 	})
 	return screen
 }
