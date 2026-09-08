@@ -188,3 +188,48 @@ func TestTabbedWindowNeverRendersWiderThanTheScreen(t *testing.T) {
 			"tabbed window line %d is wider than the screen", i)
 	}
 }
+
+// The fallback screens ("No agents running yet" and "Select an instance to open a terminal")
+// only render through UpdateContent(nil): every other test in this file sets pane content
+// directly, so none of them ever exercised the path the 29413dd fix actually touched. Pin it
+// here the same way TestTabbedWindowNeverRendersTallerThanTheScreen pins the content path.
+//
+// Unlike those tests, this one cannot hand width, height = 80, 30 straight to
+// w.SetSize: app.go never does that either — it first carves off the instance list
+// (listWidth = 0.3 of the screen) and only gives the rest to the tabbed window
+// (app/app.go's updateHandleWindowSizeEvent). At the full 80, the tabbed window's own
+// content pane comes out 70 columns wide, one column short of ever wrapping the 70-column
+// "No agents running yet..." message — so calling SetSize(80, 30) directly cannot
+// reproduce the bug the harness caught at a real 80x30 terminal. Reproducing it means
+// feeding the tabbed window the same width app.go actually gives it at that screen size,
+// then checking the render fits the 80x30 screen the harness asserts against.
+func TestTabbedWindowFallbackScreensFitTheScreen(t *testing.T) {
+	const screenWidth, screenHeight = 80, 30
+	// Mirrors app/app.go's updateHandleWindowSizeEvent at a screenWidth x screenHeight terminal.
+	const listWidth = int(screenWidth * 0.3)
+	const tabsWidth = screenWidth - listWidth
+	const contentHeight = int(screenHeight * 0.9)
+
+	w := NewTabbedWindow(NewPreviewPane(), NewTerminalPane())
+	w.SetSize(tabsWidth, contentHeight)
+
+	require.NoError(t, w.UpdatePreview(nil))
+	assertFitsTheScreen(t, w.String(), screenWidth, screenHeight, "preview fallback")
+
+	w.Toggle() // Preview -> Terminal
+	require.NoError(t, w.UpdateTerminal(nil))
+	assertFitsTheScreen(t, w.String(), screenWidth, screenHeight, "terminal fallback")
+}
+
+// assertFitsTheScreen applies both bounds this file checks elsewhere against a single render:
+// no more lines than the screen height, and no line wider than the screen width.
+func assertFitsTheScreen(t *testing.T, out string, width, height int, label string) {
+	t.Helper()
+
+	lines := strings.Split(out, "\n")
+	require.LessOrEqual(t, len(lines), height, "%s is taller than the screen", label)
+	for i, line := range lines {
+		require.LessOrEqual(t, ansi.PrintableRuneWidth(line), width,
+			"%s line %d is wider than the screen", label, i)
+	}
+}
