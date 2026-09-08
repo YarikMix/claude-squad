@@ -58,6 +58,23 @@ curl -fsSL https://raw.githubusercontent.com/YarikMix/claude-squad/main/install.
 
 - [tmux](https://github.com/tmux/tmux/wiki/Installing)
 
+### Tests
+
+Unit tests run with plain `go test`:
+
+```
+go test ./...
+```
+
+End-to-end tests build `cs`, launch it inside a sandboxed tmux server with a fake agent, and drive it with keystrokes. They need `tmux` on the machine and are opted into with a build tag:
+
+```
+go test -tags e2e ./e2e/
+go test -tags e2e ./e2e/ -run TestKillWarnsAboutUnsavedWork -v
+```
+
+Nothing they do touches your own `~/.claude-squad` or your tmux sessions.
+
 ### Usage
 
 ```
