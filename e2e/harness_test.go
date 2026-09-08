@@ -337,9 +337,10 @@ func (h *harness) dumpLog() {
 
 // Instance addresses the tmux session cs created for the instance with this title, on the
 // inner server. cs strips whitespace from the title and prefixes it; `=` asks tmux for an
-// exact match rather than a prefix match. The trailing `:` is required on tmux 3.7c: a bare
-// `=name` resolves fine for a session-level command like display-message, but a pane-level
-// command (send-keys, capture-pane) reports "can't find pane" without it.
+// exact match rather than a prefix match. On tmux 3.7c a bare `=name` is unreliable for every
+// command: pane-level ones (send-keys, capture-pane) fail loudly with "can't find pane", while
+// display-message exits 0 with empty output. The trailing `:` selects the session's current
+// window and makes all of them resolve.
 func (h *harness) Instance(title string) *pane {
 	name := tmuxPrefix + strings.Join(strings.Fields(title), "")
 	return &pane{t: h.t, env: h.env, target: "=" + name + ":"}
