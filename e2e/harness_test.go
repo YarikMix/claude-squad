@@ -335,6 +335,25 @@ func (h *harness) dumpLog() {
 	h.t.Logf("--- tail of claudesquad.log ---\n%s", strings.Join(lines, "\n"))
 }
 
+// Instance addresses the tmux session cs created for the instance with this title, on the
+// inner server. cs strips whitespace from the title and prefixes it; `=` asks tmux for an
+// exact match rather than a prefix match.
+func (h *harness) Instance(title string) *pane {
+	name := tmuxPrefix + strings.Join(strings.Fields(title), "")
+	return &pane{t: h.t, env: h.env, target: "=" + name}
+}
+
+// Worktrees lists the worktree directories cs has on disk.
+func (h *harness) Worktrees() []string {
+	matches, err := filepath.Glob(filepath.Join(h.home, ".claude-squad", "worktrees", "*"))
+	require.NoError(h.t, err)
+	return matches
+}
+
+func (h *harness) BranchExists(name string) bool {
+	return strings.TrimSpace(h.git(h.repo, "branch", "--list", name)) != ""
+}
+
 func TestHarnessStartsWithAnEmptyList(t *testing.T) {
 	h := newHarness(t)
 	screen := h.WaitFor("No agents running yet")
