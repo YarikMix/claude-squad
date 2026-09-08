@@ -75,9 +75,6 @@ const stateJSON = `{
 // $SHELL. status off makes the outer pane exactly screenWidth×screenHeight.
 const tmuxConf = "set -g default-shell /bin/sh\nset -g status off\n"
 
-// fmtSprintf exists so a test can capture a fatal message without importing fmt twice.
-var fmtSprintf = fmt.Sprintf
-
 // pane addresses one tmux target on one sandbox server and drives it the way a user
 // would: keys in, screen out.
 type pane struct {
@@ -182,6 +179,28 @@ func (p *pane) WaitNot(want string) {
 		screen, _ := p.run("capture-pane", "-p", "-t", p.target)
 		return !strings.Contains(screen, want)
 	})
+}
+
+// WaitForWidth blocks until the render reflects a resize to width w and returns that screen.
+// tmux reflows the OLD grid onto the new pane size the instant Resize returns, well before cs
+// has handled SIGWINCH and re-rendered, so a prompt string reappearing on screen is not proof
+// the new size was drawn. The menu row is sized to the full window width (app/app.go:180), so
+// once cs has redrawn, the widest captured row reaches w; the -1 tolerates a trailing column
+// tmux sometimes trims from capture-pane.
+func (p *pane) WaitForWidth(w int) string {
+	p.t.Helper()
+	var screen string
+	p.waitUntil(fmt.Sprintf("render to reach width %d", w), func() bool {
+		screen, _ = p.run("capture-pane", "-p", "-t", p.target)
+		widest := 0
+		for _, line := range strings.Split(screen, "\n") {
+			if lw := runewidth.StringWidth(line); lw > widest {
+				widest = lw
+			}
+		}
+		return widest >= w-1
+	})
+	return screen
 }
 
 func (p *pane) Resize(w, h int) {
@@ -354,6 +373,7 @@ func (h *harness) dumpLog() {
 // window and makes all of them resolve.
 func (h *harness) Instance(title string) *pane {
 	name := tmuxPrefix + strings.Join(strings.Fields(title), "")
+	name = strings.ReplaceAll(name, ".", "_") // tmux replaces all . with _, mirroring toClaudeSquadTmuxName
 	return &pane{t: h.t, env: h.env, target: "=" + name + ":"}
 }
 
@@ -448,20 +468,16 @@ func (h *harness) Relaunch() {
 
 // requireLayoutIntact checks what the user loses when a pane overflows: the list header,
 // the tab bar and the first list entry scroll off the top (PR #12), and the tab window
-// pushes the list aside when a line is wider than the pane (PR #13). capture-pane returns
-// exactly the window's rows, so an overflowing render shows up as content scrolled off the
-// top, and the width check catches an overwide row directly.
+// pushes the list aside when a line is wider than the pane (PR #13). capture-pane -p returns
+// exactly the window's rows already clipped to its size, so neither an overwide row nor an
+// extra row can show up in screen — the four Contains checks below are what actually detects
+// cs pushing content off the top; width and height are kept for context in a failure message.
 func requireLayoutIntact(t *testing.T, screen string, width, height int) {
 	t.Helper()
 	require.Contains(t, screen, "Instances", "list header scrolled off")
 	require.Contains(t, screen, "Preview")
 	require.Contains(t, screen, "Terminal")
 	require.Contains(t, screen, "alpha", "first list entry scrolled off")
-	for i, line := range strings.Split(screen, "\n") {
-		require.LessOrEqual(t, runewidth.StringWidth(line), width, "row %d wider than the window: %q", i, line)
-	}
-	rows := strings.Split(strings.TrimRight(screen, "\n"), "\n")
-	require.LessOrEqual(t, len(rows), height, "more rows than the window has")
 }
 
 func TestHarnessStartsWithAnEmptyList(t *testing.T) {
@@ -478,7 +494,7 @@ func TestWaitForReportsTheScreenOnTimeout(t *testing.T) {
 	h.WaitFor("Instances")
 	probe := &pane{t: t, env: h.env, socket: outerSocket, target: outerSession, timeout: 300 * time.Millisecond}
 	var msg string
-	probe.fatalf = func(format string, args ...any) { msg = fmtSprintf(format, args...) }
+	probe.fatalf = func(format string, args ...any) { msg = fmt.Sprintf(format, args...) }
 	probe.WaitFor("this text is not on screen")
 	require.Contains(t, msg, "timed out waiting for")
 	require.Contains(t, msg, "Instances", "the failure must carry the last screen so it reads without a rerun")

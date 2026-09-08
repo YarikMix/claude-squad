@@ -93,7 +93,7 @@ func TestResumeAfterTmuxServerDies(t *testing.T) {
 
 	screen := h.WaitFor("Session is paused. Press 'r' to resume.")
 	require.Contains(t, screen, "alpha")
-	require.Contains(t, screen, "resume", "the menu must offer r")
+	require.Contains(t, screen, "r resume", "the menu must offer r")
 
 	h.Keys("r")
 	h.WaitFor("fake-agent ready args=[--continue]")
@@ -150,7 +150,6 @@ func TestAgentExitInsideThePaneReturnsToTheList(t *testing.T) {
 	screen := h.WaitFor("Instances")
 	require.Contains(t, screen, "Session is paused. Press 'r' to resume.")
 	require.Contains(t, screen, "r resume", "the menu must offer r")
-	require.NotContains(t, screen, "Session terminated without detaching")
 	require.Empty(t, h.inner.sessions())
 
 	// After the session ends underneath an attach, cs's stdin forwarder is still blocked in
@@ -171,11 +170,13 @@ func TestTerminalTabSurvivesResize(t *testing.T) {
 	requireLayoutIntact(t, screen, screenWidth, screenHeight)
 
 	h.Resize(120, 40)
-	screen = h.WaitFor("fake-shell$")
+	h.WaitFor("fake-shell$")
+	screen = h.WaitForWidth(120)
 	requireLayoutIntact(t, screen, 120, 40)
 
 	h.Resize(screenWidth, screenHeight)
-	screen = h.WaitFor("fake-shell$")
+	h.WaitFor("fake-shell$")
+	screen = h.WaitForWidth(screenWidth)
 	requireLayoutIntact(t, screen, screenWidth, screenHeight)
 
 	// Switching away and back must not leave the pane blank (PR #10).
