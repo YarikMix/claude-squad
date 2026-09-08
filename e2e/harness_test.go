@@ -343,15 +343,58 @@ func (h *harness) Instance(title string) *pane {
 	return &pane{t: h.t, env: h.env, target: "=" + name}
 }
 
-// Worktrees lists the worktree directories cs has on disk.
+// Worktrees lists the worktree directories cs has on disk. It walks rather than globbing one
+// level: branch_prefix is "e2e/", sanitizeBranchName keeps the slash, so a worktree for title
+// "alpha" lands at worktrees/e2e/alpha_<hex>, two levels below the worktrees root. A directory
+// is a worktree once it has a ".git" file (git worktrees never nest, so the walk stops there).
 func (h *harness) Worktrees() []string {
-	matches, err := filepath.Glob(filepath.Join(h.home, ".claude-squad", "worktrees", "*"))
+	h.t.Helper()
+	root := filepath.Join(h.home, ".claude-squad", "worktrees")
+	var found []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if path == root || !d.IsDir() {
+			return nil
+		}
+		if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr == nil {
+			found = append(found, path)
+			return filepath.SkipDir
+		}
+		return nil
+	})
 	require.NoError(h.t, err)
-	return matches
+	return found
 }
 
 func (h *harness) BranchExists(name string) bool {
 	return strings.TrimSpace(h.git(h.repo, "branch", "--list", name)) != ""
+}
+
+// SoleWorktree returns the one worktree on disk; scenarios that need it run one instance.
+func (h *harness) SoleWorktree() string {
+	h.t.Helper()
+	wts := h.Worktrees()
+	require.Len(h.t, wts, 1, "expected exactly one worktree")
+	return wts[0]
+}
+
+// CommitInWorktree writes file and commits it in dir as the agent would.
+func (h *harness) CommitInWorktree(dir, file, content string) {
+	h.t.Helper()
+	writeFile(h.t, filepath.Join(dir, file), content)
+	h.git(dir, "add", file)
+	h.git(dir, "commit", "-q", "-m", "e2e: "+file)
+}
+
+// PushBranch publishes dir's branch to origin, so nothing on it counts as unpushed.
+func (h *harness) PushBranch(dir string) {
+	h.t.Helper()
+	h.git(dir, "push", "-q", "origin", "HEAD")
 }
 
 func TestHarnessStartsWithAnEmptyList(t *testing.T) {

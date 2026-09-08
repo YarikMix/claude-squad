@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,4 +37,46 @@ func TestCreateSessionAndAttach(t *testing.T) {
 	h.Keys("C-q")
 	h.WaitFor("Instances")
 	require.Equal(t, []string{tmuxPrefix + "alpha"}, h.inner.sessions(), "detaching keeps the session")
+}
+
+func TestKillWarnsAboutUnsavedWork(t *testing.T) {
+	h := newHarness(t)
+	createSession(h, "alpha")
+	wt := h.SoleWorktree()
+
+	// One commit nobody has, one tracked file modified and not committed.
+	h.CommitInWorktree(wt, "done.txt", "committed\n")
+	writeFile(t, filepath.Join(wt, "README.md"), "uncommitted change\n")
+
+	h.Keys("D")
+	screen := h.WaitFor("Kill session 'alpha'?")
+	require.Contains(t, screen, "Uncommitted changes in 1 file")
+	require.Contains(t, screen, "1 commit is on no remote")
+	require.Contains(t, screen, "Both will be lost")
+
+	h.Keys("n")
+	h.WaitNot("Kill session")
+	require.Contains(t, h.Screen(), "alpha")
+	require.Len(t, h.Worktrees(), 1, "cancelling must not touch the worktree")
+	require.True(t, h.BranchExists("e2e/alpha"))
+}
+
+func TestKillRemovesACleanSessionWithoutWarning(t *testing.T) {
+	h := newHarness(t)
+	createSession(h, "alpha")
+	wt := h.SoleWorktree()
+	h.CommitInWorktree(wt, "done.txt", "committed\n")
+	h.PushBranch(wt)
+
+	h.Keys("D")
+	screen := h.WaitFor("Kill session 'alpha'?")
+	require.NotContains(t, screen, "will be lost")
+	require.NotContains(t, screen, "Uncommitted")
+	require.NotContains(t, screen, "no remote")
+
+	h.Keys("y")
+	h.WaitFor("No agents running yet")
+	require.Empty(t, h.Worktrees())
+	require.False(t, h.BranchExists("e2e/alpha"))
+	require.Empty(t, h.inner.sessions())
 }
