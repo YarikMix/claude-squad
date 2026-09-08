@@ -55,8 +55,12 @@ func (p *PreviewPane) setFallbackState(message string) {
 	}
 
 	text := wrapped
-	if p.width == 0 || p.width >= lipgloss.Width(FallBackText) {
-		// The banner fits in the pane (or the pane size isn't known yet); show it as before.
+	bannerHeight := lipgloss.Height(FallBackText) + 1 + lipgloss.Height(wrapped)
+	if p.width == 0 || (p.width >= lipgloss.Width(FallBackText) && p.height >= bannerHeight) {
+		// The banner fits the pane both ways (or the pane size isn't known yet); show it as
+		// before. fitBox keeps only the first `height` lines of the block below, so when the
+		// banner is too tall for the pane it is the message — not the banner — that would get
+		// cut; dropping the banner here keeps the message visible instead.
 		text = lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", wrapped)
 	}
 

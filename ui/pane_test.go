@@ -204,32 +204,54 @@ func TestTabbedWindowNeverRendersWiderThanTheScreen(t *testing.T) {
 // reproduce the bug the harness caught at a real 80x30 terminal. Reproducing it means
 // feeding the tabbed window the same width app.go actually gives it at that screen size,
 // then checking the render fits the 80x30 screen the harness asserts against.
+// The 100x24 case guards a second way the fallback screens can overflow: the banner (15 lines)
+// plus the message can be taller than the pane even when the banner is narrow enough to fit. At
+// that screen size the pane comes out 61x15 — wide enough for the 49-column banner but no
+// taller than the banner alone — so fitBox, which keeps only the first `height` lines of the
+// banner+message block, used to cut the message entirely rather than the banner. Before this
+// branch's fix the pane dropped the banner only when it was too wide, never when it was too
+// tall, so this case reproduces that regression.
 func TestTabbedWindowFallbackScreensFitTheScreen(t *testing.T) {
-	const screenWidth, screenHeight = 80, 30
-	// Mirrors app/app.go's updateHandleWindowSizeEvent at a screenWidth x screenHeight terminal.
-	const listWidth = int(screenWidth * 0.3)
-	const tabsWidth = screenWidth - listWidth
-	const contentHeight = int(screenHeight * 0.9)
+	sizes := []struct {
+		name                      string
+		screenWidth, screenHeight int
+	}{
+		{"80x30", 80, 30},
+		{"100x24", 100, 24},
+	}
 
-	w := NewTabbedWindow(NewPreviewPane(), NewTerminalPane())
-	w.SetSize(tabsWidth, contentHeight)
+	for _, tc := range sizes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Mirrors app/app.go's updateHandleWindowSizeEvent at a screenWidth x screenHeight
+			// terminal.
+			listWidth := int(float32(tc.screenWidth) * 0.3)
+			tabsWidth := tc.screenWidth - listWidth
+			contentHeight := int(float32(tc.screenHeight) * 0.9)
 
-	require.NoError(t, w.UpdatePreview(nil))
-	assertFitsTheScreen(t, w.String(), screenWidth, screenHeight, "preview fallback")
+			w := NewTabbedWindow(NewPreviewPane(), NewTerminalPane())
+			w.SetSize(tabsWidth, contentHeight)
 
-	// The paused fallback joins a short hint with a much wider "checked out at" line below it;
-	// centering pads the hint out to that width before fitBox clips the pane's right edge, so a
-	// naive render loses "resume." off the end of the hint. See fitBox's doc comment.
-	paused := &session.Instance{Title: "alpha", Branch: "e2e/alpha", Status: session.Paused}
-	require.NoError(t, w.UpdatePreview(paused))
-	pausedScreen := w.String()
-	assertFitsTheScreen(t, pausedScreen, screenWidth, screenHeight, "preview paused fallback")
-	require.Contains(t, pausedScreen, "Session is paused. Press 'r' to resume.",
-		"the paused hint must survive on one line, not be clipped by the wider branch line below it")
+			require.NoError(t, w.UpdatePreview(nil))
+			previewScreen := w.String()
+			assertFitsTheScreen(t, previewScreen, tc.screenWidth, tc.screenHeight, "preview fallback")
+			require.Contains(t, previewScreen, "No agents running yet",
+				"the fallback message must survive, not be cut by a banner too tall for the pane")
 
-	w.Toggle() // Preview -> Terminal
-	require.NoError(t, w.UpdateTerminal(nil))
-	assertFitsTheScreen(t, w.String(), screenWidth, screenHeight, "terminal fallback")
+			// The paused fallback joins a short hint with a much wider "checked out at" line below it;
+			// centering pads the hint out to that width before fitBox clips the pane's right edge, so a
+			// naive render loses "resume." off the end of the hint. See fitBox's doc comment.
+			paused := &session.Instance{Title: "alpha", Branch: "e2e/alpha", Status: session.Paused}
+			require.NoError(t, w.UpdatePreview(paused))
+			pausedScreen := w.String()
+			assertFitsTheScreen(t, pausedScreen, tc.screenWidth, tc.screenHeight, "preview paused fallback")
+			require.Contains(t, pausedScreen, "Session is paused. Press 'r' to resume.",
+				"the paused hint must survive on one line, not be clipped by the wider branch line below it")
+
+			w.Toggle() // Preview -> Terminal
+			require.NoError(t, w.UpdateTerminal(nil))
+			assertFitsTheScreen(t, w.String(), tc.screenWidth, tc.screenHeight, "terminal fallback")
+		})
+	}
 }
 
 // assertFitsTheScreen applies both bounds this file checks elsewhere against a single render:
