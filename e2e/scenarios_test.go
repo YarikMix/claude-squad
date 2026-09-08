@@ -134,3 +134,30 @@ func TestRestartKeepsTheSessionAndAppendsRestartArgs(t *testing.T) {
 	h.Keys("C-q")
 	h.WaitFor("Instances")
 }
+
+func TestAgentExitInsideThePaneReturnsToTheList(t *testing.T) {
+	h := newHarness(t)
+	createSession(h, "alpha")
+	wt := h.SoleWorktree()
+
+	h.Keys("o")
+	h.WaitNot("Instances")
+
+	// Typed into the attached pane, so it reaches the agent through cs's stdin forwarder.
+	h.Type("exit 0")
+	h.Keys("Enter")
+
+	screen := h.WaitFor("Instances")
+	require.Contains(t, screen, "Session is paused. Press 'r' to resume.")
+	require.Contains(t, screen, "r resume", "the menu must offer r")
+	require.NotContains(t, screen, "Session terminated without detaching")
+	require.Empty(t, h.inner.sessions())
+
+	// After the session ends underneath an attach, cs's stdin forwarder is still blocked in
+	// a read and swallows the next keystroke (documented in PR #4). Spend a harmless key on
+	// it: Down does nothing in a one-entry list whether or not it is consumed.
+	h.Keys("Down")
+	h.Keys("r")
+	h.WaitFor("fake-agent ready args=[--continue]")
+	require.Equal(t, wt, h.SoleWorktree())
+}
