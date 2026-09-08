@@ -43,9 +43,26 @@ func (p *PreviewPane) SetSize(width, maxHeight int) {
 
 // setFallbackState sets the preview state with fallback text and a message
 func (p *PreviewPane) setFallbackState(message string) {
+	// Word-wrap and center the message to the pane width before joining it below the banner and
+	// clamping with fitBox: a message line can be wider than the pane (e.g. the "checked out at"
+	// branch hint), and wrapping it now, rather than letting JoinVertical center it against its
+	// own widest line first, keeps every line readable instead of clipped by fitBox. This is safe
+	// because the fallback text carries no captured escape sequences, unlike pane content — see
+	// fitBox's doc comment.
+	wrapped := message
+	if p.width > 0 {
+		wrapped = lipgloss.NewStyle().Width(p.width).Align(lipgloss.Center).Render(message)
+	}
+
+	text := wrapped
+	if p.width == 0 || p.width >= lipgloss.Width(FallBackText) {
+		// The banner fits in the pane (or the pane size isn't known yet); show it as before.
+		text = lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", wrapped)
+	}
+
 	p.previewState = previewState{
 		fallback: true,
-		text:     lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", message),
+		text:     text,
 	}
 }
 
@@ -59,7 +76,10 @@ func (p *PreviewPane) UpdateContent(instance *session.Instance) error {
 		p.setFallbackState("Setting up workspace...")
 		return nil
 	case instance.Status == session.Paused:
-		p.setFallbackState(lipgloss.JoinVertical(lipgloss.Center,
+		// Join with plain newlines, not lipgloss.JoinVertical: JoinVertical would center each
+		// line against the block's own widest line (the branch hint below) before setFallbackState
+		// ever sees the pane width, baking in padding that wrapping afterward can't undo.
+		p.setFallbackState(strings.Join([]string{
 			"Session is paused. Press 'r' to resume.",
 			"",
 			lipgloss.NewStyle().
@@ -71,7 +91,7 @@ func (p *PreviewPane) UpdateContent(instance *session.Instance) error {
 					"The instance can be checked out at '%s' (copied to your clipboard)",
 					instance.Branch,
 				)),
-		))
+		}, "\n"))
 		return nil
 	}
 
@@ -122,11 +142,12 @@ func (p *PreviewPane) String() string {
 	}
 
 	if p.previewState.fallback {
-		// Place, then clamp — never wrap. The fallback text is an ASCII banner: each line is one
-		// long run with no whitespace to break on, so a Width-triggered wrap (as this used to
-		// apply) wouldn't shrink it but fragment it into unreadable pieces once the pane is
-		// narrower than the banner. Place only positions and pads, it never wraps, and fitBox
-		// truncates whatever still overflows the box. See fitBox's own doc comment.
+		// Place, then clamp — never wrap here. p.previewState.text is already sized to fit
+		// p.width by setFallbackState (the ASCII banner is one long run per line with no
+		// whitespace to break on, so it is kept unwrapped and dropped instead once the pane is
+		// narrower than it; the message part was already word-wrapped and centered to p.width).
+		// Place only positions and pads vertically, it never re-wraps, and fitBox truncates
+		// whatever still overflows the box. See fitBox's own doc comment.
 		placed := lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, p.previewState.text)
 		return previewPaneStyle.Render(fitBox(placed, p.width, p.height, false, ""))
 	}

@@ -64,8 +64,23 @@ func (t *TerminalPane) SetSize(width, height int) {
 // setFallbackState sets the terminal pane to display a fallback message.
 // Caller must hold t.mu.
 func (t *TerminalPane) setFallbackState(message string) {
+	// Word-wrap and center the message to the pane width before joining it below the banner and
+	// clamping with fitBox — see the preview pane's setFallbackState for why this must happen
+	// before the join. Safe here too: the fallback text carries no captured escape sequences,
+	// unlike pane content (see fitBox's doc comment).
+	wrapped := message
+	if t.width > 0 {
+		wrapped = lipgloss.NewStyle().Width(t.width).Align(lipgloss.Center).Render(message)
+	}
+
+	text := wrapped
+	if t.width == 0 || t.width >= lipgloss.Width(FallBackText) {
+		// The banner fits in the pane (or the pane size isn't known yet); show it as before.
+		text = lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", wrapped)
+	}
+
 	t.fallback = true
-	t.fallbackText = lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", message)
+	t.fallbackText = text
 	t.content = ""
 }
 
@@ -271,10 +286,11 @@ func (t *TerminalPane) String() string {
 	content := t.content
 
 	if fallback {
-		// Place, then clamp — never wrap. See the preview pane's fallback branch: the banner is
-		// one long run per line with no whitespace to break on, so a Width-triggered wrap
-		// fragments it instead of shrinking it once the pane is narrower than the banner. Place
-		// only positions and pads, it never wraps, and fitBox truncates whatever still overflows.
+		// Place, then clamp — never wrap here. fallbackText is already sized to fit width by
+		// setFallbackState (the banner is kept unwrapped and dropped instead once the pane is
+		// narrower than it; the message part was already word-wrapped and centered to width).
+		// Place only positions and pads vertically, it never re-wraps, and fitBox truncates
+		// whatever still overflows.
 		placed := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, fallbackText)
 		return terminalPaneStyle.Render(fitBox(placed, width, height, false, ""))
 	}

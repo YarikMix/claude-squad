@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"claude-squad/session"
 	"fmt"
 	"strings"
 	"testing"
@@ -215,6 +216,16 @@ func TestTabbedWindowFallbackScreensFitTheScreen(t *testing.T) {
 
 	require.NoError(t, w.UpdatePreview(nil))
 	assertFitsTheScreen(t, w.String(), screenWidth, screenHeight, "preview fallback")
+
+	// The paused fallback joins a short hint with a much wider "checked out at" line below it;
+	// centering pads the hint out to that width before fitBox clips the pane's right edge, so a
+	// naive render loses "resume." off the end of the hint. See fitBox's doc comment.
+	paused := &session.Instance{Title: "alpha", Branch: "e2e/alpha", Status: session.Paused}
+	require.NoError(t, w.UpdatePreview(paused))
+	pausedScreen := w.String()
+	assertFitsTheScreen(t, pausedScreen, screenWidth, screenHeight, "preview paused fallback")
+	require.Contains(t, pausedScreen, "Session is paused. Press 'r' to resume.",
+		"the paused hint must survive on one line, not be clipped by the wider branch line below it")
 
 	w.Toggle() // Preview -> Terminal
 	require.NoError(t, w.UpdateTerminal(nil))
