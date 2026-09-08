@@ -185,3 +185,37 @@ func TestTerminalTabSurvivesResize(t *testing.T) {
 	screen = h.WaitFor("fake-shell$")
 	requireLayoutIntact(t, screen, screenWidth, screenHeight)
 }
+
+func TestCyrillicKeysDriveTheSameActions(t *testing.T) {
+	h := newHarness(t)
+
+	// т sits on the n key.
+	h.Type("т")
+	h.Type("alpha")
+	h.Keys("Enter")
+	h.WaitFor("alpha")
+	h.WaitFor("fake-agent ready")
+
+	// щ sits on the o key.
+	h.Type("щ")
+	h.WaitNot("Instances")
+	h.Keys("C-q")
+	h.WaitFor("Instances")
+
+	// Kill is bound to uppercase D only (GlobalKeyStringsMap has no lowercase "d"), and В is
+	// the uppercase Cyrillic letter sitting on that key.
+	h.Type("В")
+	h.WaitFor("Kill session 'alpha'?")
+	// т sits on the n key, which the dialog's own label makes it cancel.
+	h.Type("т")
+	h.WaitNot("Kill session")
+	require.Contains(t, h.Screen(), "alpha")
+	require.Len(t, h.Worktrees(), 1)
+
+	// н sits on the y key, which confirms.
+	h.Type("В")
+	h.WaitFor("Kill session 'alpha'?")
+	h.Type("н")
+	h.WaitFor("No agents running yet")
+	require.Empty(t, h.Worktrees())
+}
