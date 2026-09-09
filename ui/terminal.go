@@ -64,8 +64,27 @@ func (t *TerminalPane) SetSize(width, height int) {
 // setFallbackState sets the terminal pane to display a fallback message.
 // Caller must hold t.mu.
 func (t *TerminalPane) setFallbackState(message string) {
+	// Word-wrap and center the message to the pane width before joining it below the banner and
+	// clamping with fitBox — see the preview pane's setFallbackState for why this must happen
+	// before the join. Safe here too: the fallback text carries no captured escape sequences,
+	// unlike pane content (see fitBox's doc comment).
+	wrapped := message
+	if t.width > 0 {
+		wrapped = lipgloss.NewStyle().Width(t.width).Align(lipgloss.Center).Render(message)
+	}
+
+	text := wrapped
+	bannerHeight := lipgloss.Height(FallBackText) + 1 + lipgloss.Height(wrapped)
+	if t.width == 0 || (t.width >= lipgloss.Width(FallBackText) && t.height >= bannerHeight) {
+		// The banner fits the pane both ways (or the pane size isn't known yet); show it as
+		// before. fitBox keeps only the first `height` lines of the block below, so when the
+		// banner is too tall for the pane it is the message — not the banner — that would get
+		// cut; dropping the banner here keeps the message visible instead.
+		text = lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", wrapped)
+	}
+
 	t.fallback = true
-	t.fallbackText = lipgloss.JoinVertical(lipgloss.Center, FallBackText, "", message)
+	t.fallbackText = text
 	t.content = ""
 }
 
@@ -271,30 +290,13 @@ func (t *TerminalPane) String() string {
 	content := t.content
 
 	if fallback {
-		// 3 = tab bar height (border + padding + text), 4 = window style frame (top/bottom border + padding)
-		availableHeight := height - 3 - 4
-		fallbackLines := len(strings.Split(fallbackText, "\n"))
-		totalPadding := availableHeight - fallbackLines
-		topPadding := 0
-		bottomPadding := 0
-		if totalPadding > 0 {
-			topPadding = totalPadding / 2
-			bottomPadding = totalPadding - topPadding
-		}
-
-		var lines []string
-		if topPadding > 0 {
-			lines = append(lines, strings.Repeat("\n", topPadding))
-		}
-		lines = append(lines, fallbackText)
-		if bottomPadding > 0 {
-			lines = append(lines, strings.Repeat("\n", bottomPadding))
-		}
-
-		return terminalPaneStyle.
-			Width(width).
-			Align(lipgloss.Center).
-			Render(strings.Join(lines, ""))
+		// Place, then clamp — never wrap here. fallbackText is already sized to fit width by
+		// setFallbackState (the banner is kept unwrapped and dropped instead once the pane is
+		// narrower than it; the message part was already word-wrapped and centered to width).
+		// Place only positions and pads vertically, it never re-wraps, and fitBox truncates
+		// whatever still overflows.
+		placed := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, fallbackText)
+		return terminalPaneStyle.Render(fitBox(placed, width, height, false, ""))
 	}
 
 	// Normal mode: show captured content. Strip OSC sequences first — see the preview pane

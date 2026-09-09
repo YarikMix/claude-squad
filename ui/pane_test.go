@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"claude-squad/session"
 	"fmt"
 	"strings"
 	"testing"
@@ -186,5 +187,82 @@ func TestTabbedWindowNeverRendersWiderThanTheScreen(t *testing.T) {
 	for i, line := range strings.Split(w.String(), "\n") {
 		require.LessOrEqual(t, ansi.PrintableRuneWidth(line), width,
 			"tabbed window line %d is wider than the screen", i)
+	}
+}
+
+// The fallback screens ("No agents running yet" and "Select an instance to open a terminal")
+// only render through UpdateContent(nil): every other test in this file sets pane content
+// directly, so none of them ever exercised the path the 29413dd fix actually touched. Pin it
+// here the same way TestTabbedWindowNeverRendersTallerThanTheScreen pins the content path.
+//
+// Unlike those tests, this one cannot hand width, height = 80, 30 straight to
+// w.SetSize: app.go never does that either — it first carves off the instance list
+// (listWidth = 0.3 of the screen) and only gives the rest to the tabbed window
+// (app/app.go's updateHandleWindowSizeEvent). At the full 80, the tabbed window's own
+// content pane comes out 70 columns wide, one column short of ever wrapping the 70-column
+// "No agents running yet..." message — so calling SetSize(80, 30) directly cannot
+// reproduce the bug the harness caught at a real 80x30 terminal. Reproducing it means
+// feeding the tabbed window the same width app.go actually gives it at that screen size,
+// then checking the render fits the 80x30 screen the harness asserts against.
+// The 100x24 case guards a second way the fallback screens can overflow: the banner (15 lines)
+// plus the message can be taller than the pane even when the banner is narrow enough to fit. At
+// that screen size the pane comes out 61x15 — wide enough for the 49-column banner but no
+// taller than the banner alone — so fitBox, which keeps only the first `height` lines of the
+// banner+message block, used to cut the message entirely rather than the banner. Before this
+// branch's fix the pane dropped the banner only when it was too wide, never when it was too
+// tall, so this case reproduces that regression.
+func TestTabbedWindowFallbackScreensFitTheScreen(t *testing.T) {
+	sizes := []struct {
+		name                      string
+		screenWidth, screenHeight int
+	}{
+		{"80x30", 80, 30},
+		{"100x24", 100, 24},
+	}
+
+	for _, tc := range sizes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Mirrors app/app.go's updateHandleWindowSizeEvent at a screenWidth x screenHeight
+			// terminal.
+			listWidth := int(float32(tc.screenWidth) * 0.3)
+			tabsWidth := tc.screenWidth - listWidth
+			contentHeight := int(float32(tc.screenHeight) * 0.9)
+
+			w := NewTabbedWindow(NewPreviewPane(), NewTerminalPane())
+			w.SetSize(tabsWidth, contentHeight)
+
+			require.NoError(t, w.UpdatePreview(nil))
+			previewScreen := w.String()
+			assertFitsTheScreen(t, previewScreen, tc.screenWidth, tc.screenHeight, "preview fallback")
+			require.Contains(t, previewScreen, "No agents running yet",
+				"the fallback message must survive, not be cut by a banner too tall for the pane")
+
+			// The paused fallback joins a short hint with a much wider "checked out at" line below it;
+			// centering pads the hint out to that width before fitBox clips the pane's right edge, so a
+			// naive render loses "resume." off the end of the hint. See fitBox's doc comment.
+			paused := &session.Instance{Title: "alpha", Branch: "e2e/alpha", Status: session.Paused}
+			require.NoError(t, w.UpdatePreview(paused))
+			pausedScreen := w.String()
+			assertFitsTheScreen(t, pausedScreen, tc.screenWidth, tc.screenHeight, "preview paused fallback")
+			require.Contains(t, pausedScreen, "Session is paused. Press 'r' to resume.",
+				"the paused hint must survive on one line, not be clipped by the wider branch line below it")
+
+			w.Toggle() // Preview -> Terminal
+			require.NoError(t, w.UpdateTerminal(nil))
+			assertFitsTheScreen(t, w.String(), tc.screenWidth, tc.screenHeight, "terminal fallback")
+		})
+	}
+}
+
+// assertFitsTheScreen applies both bounds this file checks elsewhere against a single render:
+// no more lines than the screen height, and no line wider than the screen width.
+func assertFitsTheScreen(t *testing.T, out string, width, height int, label string) {
+	t.Helper()
+
+	lines := strings.Split(out, "\n")
+	require.LessOrEqual(t, len(lines), height, "%s is taller than the screen", label)
+	for i, line := range lines {
+		require.LessOrEqual(t, ansi.PrintableRuneWidth(line), width,
+			"%s line %d is wider than the screen", label, i)
 	}
 }

@@ -1,0 +1,29 @@
+#!/bin/sh
+# fake-agent stands in for claude in the e2e tests.
+#
+# The banner names the arguments it was started with, which is how a test tells a first
+# start (no args) from a resume or restart (restart_args appended). After that it reads
+# commands from stdin, which inside a tmux pane is the pane's tty, so a test drives it
+# with `tmux send-keys`. Output it produces is prefixed so a test can tell the agent's
+# reply from the tty echo of the command it typed.
+printf 'fake-agent ready args=[%s]\n' "$*"
+while IFS= read -r line; do
+	# shellcheck disable=SC2086
+	set -- $line
+	case "$1" in
+	echo)
+		shift
+		printf 'fake-agent: %s\n' "$*"
+		;;
+	wide)
+		awk -v n="$2" 'BEGIN { while (i++ < n) printf "x"; print "" }'
+		;;
+	exit)
+		exit "${2:-0}"
+		;;
+	*)
+		printf 'fake-agent: unknown command: %s\n' "$line"
+		;;
+	esac
+done
+exit 0
