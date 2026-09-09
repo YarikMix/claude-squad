@@ -369,6 +369,22 @@ func (h *harness) dumpLog() {
 		lines = lines[len(lines)-40:]
 	}
 	h.t.Logf("--- tail of claudesquad.log ---\n%s", strings.Join(lines, "\n"))
+	h.dumpTmuxState()
+}
+
+// dumpTmuxState prints what both sandbox servers hold at the moment of failure: the sessions,
+// their panes' liveness and foreground command, and the tmux/agent processes. A screen alone
+// cannot tell "cs never noticed the session died" from "the session never died".
+func (h *harness) dumpTmuxState() {
+	inner, _ := h.inner.run("list-panes", "-a", "-F",
+		"#{session_name} attached=#{session_attached} dead=#{pane_dead} cmd=#{pane_current_command} pid=#{pane_pid}")
+	outer, _ := h.pane.run("list-panes", "-a", "-F",
+		"#{session_name} attached=#{session_attached} dead=#{pane_dead} cmd=#{pane_current_command} pid=#{pane_pid}")
+	ps := exec.Command("sh", "-c", "ps -eo pid,ppid,stat,args | grep -E 'tmux|fake-agent|/cs ' | grep -v grep")
+	ps.Env = h.env
+	procs, _ := ps.CombinedOutput()
+	h.t.Logf("--- inner server panes ---\n%s--- outer server panes ---\n%s--- processes ---\n%s",
+		inner, outer, procs)
 }
 
 // Instance addresses the tmux session cs created for the instance with this title, on the
