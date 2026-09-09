@@ -34,8 +34,7 @@ func TestCreateSessionAndAttach(t *testing.T) {
 	h.WaitNot("Instances")
 	h.WaitFor("fake-agent ready args=[]")
 
-	h.Keys("C-q")
-	h.WaitFor("Instances")
+	h.keysUntil("Instances", "C-q")
 	require.Equal(t, []string{tmuxPrefix + "alpha"}, h.inner.sessions(), "detaching keeps the session")
 }
 
@@ -125,14 +124,12 @@ func TestRestartKeepsTheSessionAndAppendsRestartArgs(t *testing.T) {
 	h.WaitNot("Instances")
 	h.WaitFor("fake-agent: second")
 
-	h.Keys("C-x")
-	h.WaitNot("fake-agent: second")
+	h.keysUntilGone("fake-agent: second", "C-x")
 	screen := h.WaitFor("fake-agent ready args=[--continue]")
 	require.NotContains(t, screen, "Instances", "Ctrl+X keeps the user attached")
 	require.Equal(t, "alpha", h.WindowName("alpha"))
 
-	h.Keys("C-q")
-	h.WaitFor("Instances")
+	h.keysUntil("Instances", "C-q")
 }
 
 func TestAgentExitInsideThePaneReturnsToTheList(t *testing.T) {
@@ -144,10 +141,8 @@ func TestAgentExitInsideThePaneReturnsToTheList(t *testing.T) {
 	h.WaitNot("Instances")
 
 	// Typed into the attached pane, so it reaches the agent through cs's stdin forwarder.
-	h.Type("exit 0")
-	h.Keys("Enter")
-
-	screen := h.WaitFor("Instances")
+	h.typeUntil("exit 0", "exit 0")
+	screen := h.keysUntil("Instances", "Enter")
 	require.Contains(t, screen, "Session is paused. Press 'r' to resume.")
 	require.Contains(t, screen, "r resume", "the menu must offer r")
 	require.Empty(t, h.inner.sessions())
@@ -200,8 +195,7 @@ func TestCyrillicKeysDriveTheSameActions(t *testing.T) {
 	// щ sits on the o key.
 	h.Type("щ")
 	h.WaitNot("Instances")
-	h.Keys("C-q")
-	h.WaitFor("Instances")
+	h.keysUntil("Instances", "C-q")
 
 	// Kill is bound to uppercase D only (GlobalKeyStringsMap has no lowercase "d"), and В is
 	// the uppercase Cyrillic letter sitting on that key.

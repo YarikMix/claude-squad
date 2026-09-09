@@ -181,6 +181,57 @@ func (p *pane) WaitNot(want string) {
 	})
 }
 
+// keysUntil sends keys to this pane and resends them on each poll until want appears, then
+// returns the screen. cs can drop the first keystroke after an attach (bubbletea steals one
+// chunk before it parks; cs also discards stdin for 50ms to swallow the terminal's query
+// replies), so a real user — and this helper — presses again when nothing happens. The
+// screen is checked before each send, so no key is sent once the effect is on screen.
+func (p *pane) keysUntil(want string, keys ...string) string {
+	p.t.Helper()
+	var screen string
+	p.waitUntil(fmt.Sprintf("%q after resending %s", want, strings.Join(keys, " ")), func() bool {
+		screen, _ = p.run("capture-pane", "-p", "-t", p.target)
+		if strings.Contains(screen, want) {
+			return true
+		}
+		p.Keys(keys...)
+		return false
+	})
+	return screen
+}
+
+// keysUntilGone is keysUntil for an effect that removes text rather than adds it (a restart
+// clearing the pane's scrollback).
+func (p *pane) keysUntilGone(gone string, keys ...string) {
+	p.t.Helper()
+	p.waitUntil(fmt.Sprintf("%q gone after resending %s", gone, strings.Join(keys, " ")), func() bool {
+		screen, _ := p.run("capture-pane", "-p", "-t", p.target)
+		if !strings.Contains(screen, gone) {
+			return true
+		}
+		p.Keys(keys...)
+		return false
+	})
+}
+
+// typeUntil types text literally and resends it until it echoes, so a command typed into an
+// attached pane is not lost to the post-attach window. It relies on the tty echoing typed
+// input (cooked mode), which the pane does; a whole chunk is dropped or delivered, never
+// split, so a resend cannot corrupt a partially-typed line.
+func (p *pane) typeUntil(want, text string) string {
+	p.t.Helper()
+	var screen string
+	p.waitUntil(fmt.Sprintf("%q echoed", want), func() bool {
+		screen, _ = p.run("capture-pane", "-p", "-t", p.target)
+		if strings.Contains(screen, want) {
+			return true
+		}
+		p.Type(text)
+		return false
+	})
+	return screen
+}
+
 // WaitForWidth blocks until the render reflects a resize to width w and returns that screen.
 // tmux reflows the OLD grid onto the new pane size the instant Resize returns, well before cs
 // has handled SIGWINCH and re-rendered, so a prompt string reappearing on screen is not proof
